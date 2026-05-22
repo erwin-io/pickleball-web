@@ -4,61 +4,13 @@ import './style.css';
 
 const app = document.querySelector('#app');
 
-const pointOverlay = document.createElement('div');
-pointOverlay.style.position = 'fixed';
-pointOverlay.style.left = '50%';
-pointOverlay.style.top = '18%';
-pointOverlay.style.transform = 'translate(-50%, -50%) scale(0.96)';
-pointOverlay.style.zIndex = '20';
-pointOverlay.style.padding = '18px 28px';
-pointOverlay.style.borderRadius = '22px';
-pointOverlay.style.fontFamily = 'Arial, Helvetica, sans-serif';
-pointOverlay.style.fontWeight = '900';
-pointOverlay.style.fontSize = '28px';
-pointOverlay.style.letterSpacing = '0.04em';
-pointOverlay.style.textAlign = 'center';
-pointOverlay.style.color = '#ffffff';
-pointOverlay.style.background = 'rgba(8, 17, 34, 0.78)';
-pointOverlay.style.border = '1px solid rgba(255, 255, 255, 0.24)';
-pointOverlay.style.boxShadow = '0 24px 80px rgba(0,0,0,0.42)';
-pointOverlay.style.backdropFilter = 'blur(12px)';
-pointOverlay.style.opacity = '0';
-pointOverlay.style.pointerEvents = 'none';
-pointOverlay.style.transition = 'opacity 180ms ease, transform 180ms ease';
-pointOverlay.innerHTML = '';
-document.body.appendChild(pointOverlay);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x071225);
-scene.fog = new THREE.Fog(0x071225, 22, 54);
-
-const camera = new THREE.PerspectiveCamera(
-  62,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  100
-);
-
-camera.position.set(0, 7.2, 12.5);
-camera.lookAt(0, 1.1, 0);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.domElement.style.cursor = 'crosshair';
-app.appendChild(renderer.domElement);
-
-const clock = new THREE.Clock();
-
-const raycaster = new THREE.Raycaster();
-const pointerNdc = new THREE.Vector2();
-const paddleTargetPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -PLAYER_FIXED_Y_PLACEHOLDER());
-
-function PLAYER_FIXED_Y_PLACEHOLDER() {
-  return 1.16;
-}
+const PLAYER = {
+  fixedY: 1.16,
+  stamina: 0.86,
+  lastSwingPower: 0,
+  serveReadyMinSwing: 5.25,
+  serveMinForwardDistance: 0.34
+};
 
 const COURT = {
   width: 7.2,
@@ -86,22 +38,187 @@ const BALL = {
   gravity: -7.25,
   bounce: 0.68,
   drag: 0.9955,
-  airSpinDrag: 0.010,
+  airSpinDrag: 0.01,
   floorFriction: 0.9,
   minY: 0.16,
   resetCooldown: 0,
   hitCooldown: 0
 };
 
-const PLAYER = {
-  fixedY: 1.16,
-  stamina: 0.86,
-  lastSwingPower: 0,
-  serveReadyMinSwing: 5.25,
-  serveMinForwardDistance: 0.34
+const GAME_RULES = {
+  winningScore: 11,
+  winBy: 2
 };
 
-paddleTargetPlane.constant = -PLAYER.fixedY;
+const DIFFICULTIES = {
+  easy: {
+    label: 'Easy',
+    description: 'Best for testing. AI is much slower and makes more mistakes.',
+    ai: {
+      baseReaction: 0.24,
+      baseMaxSpeed: 3.2,
+      sprintSpeed: 4.8,
+      acceleration: 8.5,
+      deceleration: 7.5,
+      skill: 0.42,
+      stamina: 0.58,
+      mistakeMultiplier: 3.4,
+      shotPowerMultiplier: 0.78,
+      netMistakeChance: 0.11,
+      outMistakeChance: 0.12
+    }
+  },
+  normal: {
+    label: 'Normal',
+    description: 'Balanced. Easier than the previous AI.',
+    ai: {
+      baseReaction: 0.17,
+      baseMaxSpeed: 5.0,
+      sprintSpeed: 6.8,
+      acceleration: 12.0,
+      deceleration: 10.5,
+      skill: 0.68,
+      stamina: 0.72,
+      mistakeMultiplier: 1.75,
+      shotPowerMultiplier: 0.9,
+      netMistakeChance: 0.075,
+      outMistakeChance: 0.075
+    }
+  },
+  hard: {
+    label: 'Hard',
+    description: 'Current strong AI behavior.',
+    ai: {
+      baseReaction: 0.11,
+      baseMaxSpeed: 6.8,
+      sprintSpeed: 9.2,
+      acceleration: 16.5,
+      deceleration: 14.5,
+      skill: 0.84,
+      stamina: 0.84,
+      mistakeMultiplier: 1.0,
+      shotPowerMultiplier: 1.0,
+      netMistakeChance: 0.04,
+      outMistakeChance: 0.04
+    }
+  }
+};
+
+const STORAGE_KEY = 'pickleball_3d_game_stats_v1';
+
+const stats = loadStats();
+
+let selectedDifficulty = 'easy';
+
+const homeScreen = document.createElement('div');
+homeScreen.className = 'home-screen';
+homeScreen.innerHTML = `
+  <div class="home-card">
+    <div class="eyebrow">3D Pickleball Game</div>
+    <h1>Paddle Panic</h1>
+    <p class="home-subtitle">
+      First to 11 points, win by 2. Only the server scores. Win a rally while receiving to get the serve.
+    </p>
+
+    <div class="difficulty-title">Choose difficulty</div>
+    <div class="difficulty-grid">
+      <button class="difficulty-btn active" data-difficulty="easy">
+        <strong>Easy</strong>
+        <span>2–4x easier AI</span>
+      </button>
+      <button class="difficulty-btn" data-difficulty="normal">
+        <strong>Normal</strong>
+        <span>1x easier AI</span>
+      </button>
+      <button class="difficulty-btn" data-difficulty="hard">
+        <strong>Hard</strong>
+        <span>Previous strong AI</span>
+      </button>
+    </div>
+
+    <div class="difficulty-description" id="difficultyDescription">
+      ${DIFFICULTIES.easy.description}
+    </div>
+
+    <button id="startGameBtn" class="start-btn">Start Game</button>
+
+    <div class="stats-panel">
+      <div>
+        <span>Games</span>
+        <strong id="statGames">${stats.gamesPlayed}</strong>
+      </div>
+      <div>
+        <span>Your Wins</span>
+        <strong id="statPlayerWins">${stats.playerWins}</strong>
+      </div>
+      <div>
+        <span>AI Wins</span>
+        <strong id="statAiWins">${stats.aiWins}</strong>
+      </div>
+      <div>
+        <span>Best Score</span>
+        <strong id="statBestScore">${stats.bestPlayerScore}</strong>
+      </div>
+    </div>
+
+    <div class="controls-help">
+      <strong>Controls:</strong> drag to move paddle, click/tap court to quickly reposition, swing forward to serve/hit.
+    </div>
+  </div>
+`;
+document.body.appendChild(homeScreen);
+
+const gameHud = document.createElement('div');
+gameHud.className = 'game-hud hidden';
+gameHud.innerHTML = `
+  <div class="score-box player">
+    <span>You</span>
+    <strong id="playerScore">0</strong>
+  </div>
+  <div class="center-hud">
+    <div id="serverText">Server: You</div>
+    <div id="difficultyText">Easy</div>
+    <button id="quitGameBtn">Quit</button>
+  </div>
+  <div class="score-box opponent">
+    <span>Opponent</span>
+    <strong id="aiScore">0</strong>
+  </div>
+`;
+document.body.appendChild(gameHud);
+
+const pointOverlay = document.createElement('div');
+pointOverlay.className = 'point-overlay';
+pointOverlay.innerHTML = '';
+document.body.appendChild(pointOverlay);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x071225);
+scene.fog = new THREE.Fog(0x071225, 22, 54);
+
+const camera = new THREE.PerspectiveCamera(
+  62,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  100
+);
+
+camera.position.set(0, 7.2, 12.5);
+camera.lookAt(0, 1.1, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.domElement.style.cursor = 'crosshair';
+renderer.domElement.classList.add('game-canvas');
+app.appendChild(renderer.domElement);
+
+const clock = new THREE.Clock();
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+const paddleTargetPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -PLAYER.fixedY);
 
 const input = {
   dragging: false,
@@ -113,14 +230,13 @@ const input = {
   pointerDownTime: 0,
   totalPointerMove: 0,
 
-  // Click-to-position target.
   clickMoveBoostTimer: 0,
 
   desiredPaddle: new THREE.Vector3(0, PLAYER.fixedY, COURT.playerServeZ)
 };
 
 const game = {
-  state: 'waitingServe',
+  state: 'home',
   server: 'player',
   serveTimer: 0,
 
@@ -142,7 +258,8 @@ const game = {
 
   lastHitOwner: null,
   rallyHits: 0,
-  time: 0
+  time: 0,
+  difficulty: 'easy'
 };
 
 const audio = createGameAudio();
@@ -176,19 +293,146 @@ scene.add(playerPaddle, aiPaddle);
 const ball = createBall();
 scene.add(ball.mesh);
 
-const aiOpponent = new HumanLikePickleballAI({
-  baseReaction: 0.11,
-  baseMaxSpeed: 6.8,
-  sprintSpeed: 9.2,
-  acceleration: 16.5,
-  deceleration: 14.5,
-  skill: 0.84,
-  stamina: 0.84
-});
+const aiOpponent = new HumanLikePickleballAI(DIFFICULTIES.easy.ai);
 
-enterServeState('player');
+bindHomeUI();
 bindInput();
+enterHomeState();
 animate();
+
+function bindHomeUI() {
+  document.querySelectorAll('.difficulty-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedDifficulty = btn.dataset.difficulty;
+
+      document.querySelectorAll('.difficulty-btn').forEach((b) => {
+        b.classList.remove('active');
+      });
+
+      btn.classList.add('active');
+
+      document.querySelector('#difficultyDescription').textContent =
+        DIFFICULTIES[selectedDifficulty].description;
+    });
+  });
+
+  document.querySelector('#startGameBtn').addEventListener('click', () => {
+    audio.resume();
+    startNewGame(selectedDifficulty);
+  });
+
+  document.querySelector('#quitGameBtn').addEventListener('click', () => {
+    endGameEarly();
+  });
+}
+
+function startNewGame(difficulty) {
+  game.state = 'starting';
+  game.difficulty = difficulty;
+
+  aiOpponent.configure(DIFFICULTIES[difficulty].ai);
+
+  game.playerScore = 0;
+  game.aiScore = 0;
+  game.server = 'player';
+  game.pendingServer = null;
+  game.deadBallTimer = 0;
+  game.lastHitOwner = null;
+  game.rallyHits = 0;
+
+  PLAYER.stamina = 0.9;
+  PLAYER.lastSwingPower = 0;
+
+  pointOverlay.classList.remove('show');
+
+  homeScreen.classList.add('hidden');
+  gameHud.classList.remove('hidden');
+  renderer.domElement.classList.remove('hidden');
+
+  document.querySelector('#difficultyText').textContent =
+    DIFFICULTIES[difficulty].label;
+
+  updateHud();
+
+  enterServeState('player');
+
+  window.setTimeout(() => {
+    showPointOverlay('neutral', 'Game Start', 'Your serve first. Drag forward hard to serve.', false);
+  }, 100);
+}
+
+function enterHomeState() {
+  game.state = 'home';
+
+  ball.position.set(0, -99, 0);
+  ball.velocity.set(0, 0, 0);
+
+  homeScreen.classList.remove('hidden');
+  gameHud.classList.add('hidden');
+  renderer.domElement.classList.add('hidden');
+  pointOverlay.classList.remove('show');
+
+  refreshStatsUI();
+}
+
+function endGameEarly() {
+  showPointOverlay('neutral', 'Game Quit', 'Back to home', false);
+
+  window.setTimeout(() => {
+    enterHomeState();
+  }, 700);
+}
+
+function finishGame(winner) {
+  game.state = 'gameOver';
+
+  const playerWon = winner === 'player';
+
+  stats.gamesPlayed += 1;
+
+  if (playerWon) {
+    stats.playerWins += 1;
+  } else {
+    stats.aiWins += 1;
+  }
+
+  stats.bestPlayerScore = Math.max(stats.bestPlayerScore, game.playerScore);
+
+  stats.lastGames.unshift({
+    winner,
+    difficulty: game.difficulty,
+    playerScore: game.playerScore,
+    aiScore: game.aiScore,
+    date: new Date().toISOString()
+  });
+
+  stats.lastGames = stats.lastGames.slice(0, 10);
+
+  saveStats(stats);
+
+  showPointOverlay(
+    winner,
+    playerWon ? 'YOU WIN THE GAME!' : 'OPPONENT WINS THE GAME',
+    `Final Score: You ${game.playerScore} — ${game.aiScore} Opponent`,
+    true
+  );
+
+  window.setTimeout(() => {
+    enterHomeState();
+  }, 3200);
+}
+
+function isGameOver() {
+  const high = Math.max(game.playerScore, game.aiScore);
+  const diff = Math.abs(game.playerScore - game.aiScore);
+
+  return high >= GAME_RULES.winningScore && diff >= GAME_RULES.winBy;
+}
+
+function getGameWinner() {
+  if (!isGameOver()) return null;
+  return game.playerScore > game.aiScore ? 'player' : 'ai';
+}
 
 function setupLights() {
   const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x1d2430, 1.4);
@@ -471,6 +715,10 @@ function createBall() {
 }
 
 function enterServeState(server) {
+  if (game.state === 'home' || game.state === 'gameOver') {
+    return;
+  }
+
   game.state = 'waitingServe';
   game.server = server;
   game.serveTimer = server === 'ai' ? 0.9 : 0;
@@ -494,6 +742,8 @@ function enterServeState(server) {
     aiPaddle.position.set(0, PLAYER.fixedY, COURT.aiPaddleZ);
     ball.position.set(0, 1.18, COURT.aiPaddleZ + 0.62);
   }
+
+  updateHud();
 }
 
 function resetBallRallyState() {
@@ -526,6 +776,8 @@ function bindInput() {
   const unlockAudio = () => audio.resume();
 
   renderer.domElement.addEventListener('pointerdown', (event) => {
+    if (game.state === 'home' || game.state === 'gameOver') return;
+
     unlockAudio();
 
     input.dragging = true;
@@ -551,11 +803,7 @@ function bindInput() {
     input.lastX = event.clientX;
     input.lastY = event.clientY;
 
-    // Easier control:
-    // Sideways speed is increased a lot so you can reach incoming shots faster.
     const xSensitivity = 0.026;
-
-    // Forward/back also slightly faster, but not too much to avoid accidental serve.
     const forwardBackSensitivity = 0.026;
 
     input.desiredPaddle.x += dx * xSensitivity;
@@ -566,6 +814,7 @@ function bindInput() {
 
   renderer.domElement.addEventListener('pointerup', (event) => {
     const clickDuration = performance.now() - input.pointerDownTime;
+
     const clickDistance = Math.hypot(
       event.clientX - input.pointerDownX,
       event.clientY - input.pointerDownY
@@ -576,7 +825,7 @@ function bindInput() {
       clickDistance < 9 &&
       input.totalPointerMove < 14;
 
-    if (isClickToMove) {
+    if (isClickToMove && game.state !== 'home' && game.state !== 'gameOver') {
       movePaddleTargetToScreenPoint(event.clientX, event.clientY);
     }
 
@@ -625,7 +874,6 @@ function movePaddleTargetToScreenPoint(clientX, clientY) {
 
   clampDesiredPaddle();
 
-  // Temporary fast movement toward clicked position.
   input.clickMoveBoostTimer = 0.32;
 }
 
@@ -710,13 +958,18 @@ function update(dt) {
   updatePaddleVisual(playerPaddle, game.playerPaddleVelocity, true, dt);
   updatePaddleVisual(aiPaddle, game.aiPaddleVelocity, false, dt);
 
+  if (game.state === 'home' || game.state === 'gameOver') {
+    updateDustSystem(dt);
+    return;
+  }
+
   if (game.pendingServer) {
     game.previousBallPosition.copy(ball.position);
     stepBall(dt);
     updatePointResetTimer(dt);
   } else if (game.state === 'waitingServe') {
     updateServeState(dt);
-  } else {
+  } else if (game.state === 'rally') {
     game.previousBallPosition.copy(ball.position);
 
     stepBall(dt);
@@ -728,7 +981,7 @@ function update(dt) {
     const alreadyReset = checkOutOfBounds();
 
     if (!alreadyReset) {
-      checkDeadBallAndReset(dt);
+      checkDeadBallAndReset();
     }
   }
 
@@ -844,6 +1097,7 @@ function launchPlayerServe(rawSwing) {
   );
 
   const dz = Math.abs(target.z - ball.position.z);
+
   const travelSpeed = THREE.MathUtils.lerp(
     5.4,
     10.8,
@@ -860,11 +1114,13 @@ function launchPlayerServe(rawSwing) {
   });
 
   velocity.x += game.playerPaddleVelocity.x * 0.1;
+
   velocity.y += THREE.MathUtils.lerp(
     0.16,
     0.56,
     THREE.MathUtils.clamp(power / 1.45, 0, 1)
   );
+
   velocity.z = -Math.abs(velocity.z);
 
   ensureNetClearance(velocity, -1, 0.72);
@@ -891,6 +1147,7 @@ function launchPlayerServe(rawSwing) {
 
   animatePaddleHit(playerPaddle, power, 'player');
   spawnHitDust(ball.position, power, 1);
+
   audio.playPaddleHit({
     power,
     distance: 0.4,
@@ -928,6 +1185,7 @@ function launchAIServe() {
 
   velocity.z = Math.abs(velocity.z);
   velocity.y += 0.24;
+
   ensureNetClearance(velocity, 1, 0.78);
 
   ball.velocity.set(
@@ -942,6 +1200,7 @@ function launchAIServe() {
 
   animatePaddleHit(aiPaddle, 0.75, 'ai');
   spawnHitDust(ball.position, 0.75, -1);
+
   audio.playPaddleHit({
     power: 0.75,
     distance: distanceFromPlayer(ball.position),
@@ -1061,7 +1320,7 @@ function stepBall(dt) {
         if (!ball.firstBounceIn) {
           const winner = oppositePlayer(game.lastHitOwner);
           const reason = getOutReasonFromLanding(impactPosition, game.lastHitOwner);
-          schedulePointReset(winner, 0.95, reason);
+          scheduleRallyResult(winner, 0.95, reason);
           return;
         }
       }
@@ -1236,7 +1495,7 @@ function applyAIHumanReturnShot({ direction, offsetX, offsetY, paddleVelocity })
   velocity.y += intent.arcBoost + (intent.wantsSafeLob ? 0.18 : 0.1);
   velocity.z = Math.abs(velocity.z) * direction;
 
-  ensureNetClearance(velocity, direction, intent.wantsSafeLob ? 0.86 : 0.74);
+  ensureNetClearance(velocity, direction, intent.netSafety);
 
   const quality = intent.contactQuality;
   const maxZ = THREE.MathUtils.lerp(7.2, 10.8, intent.power);
@@ -1244,7 +1503,7 @@ function applyAIHumanReturnShot({ direction, offsetX, offsetY, paddleVelocity })
 
   ball.velocity.set(
     THREE.MathUtils.clamp(velocity.x, -4.3, 4.3),
-    THREE.MathUtils.clamp(velocity.y, 2.35, 6.2),
+    THREE.MathUtils.clamp(velocity.y, 2.1, 6.2),
     direction > 0
       ? THREE.MathUtils.clamp(velocity.z, minZ, maxZ)
       : THREE.MathUtils.clamp(velocity.z, -maxZ, -minZ)
@@ -1479,7 +1738,7 @@ function checkNetCollision() {
       distance: distanceFromPlayer(ball.position)
     });
 
-    schedulePointReset(winner, 1.15, `${playerLabel(faultOwner)} hit the net`);
+    scheduleRallyResult(winner, 1.15, `${playerLabel(faultOwner)} hit the net`);
     return true;
   }
 
@@ -1513,12 +1772,12 @@ function checkOutOfBounds() {
       ? `${playerLabel(game.lastHitOwner)} hit very long`
       : 'Dead ball';
 
-  schedulePointReset(winner, 1.0, reason);
+  scheduleRallyResult(winner, 1.0, reason);
 
   return true;
 }
 
-function checkDeadBallAndReset(dt) {
+function checkDeadBallAndReset() {
   const horizontalSpeed = Math.sqrt(
     ball.velocity.x * ball.velocity.x +
     ball.velocity.z * ball.velocity.z
@@ -1528,32 +1787,71 @@ function checkDeadBallAndReset(dt) {
   const onFloor = ball.position.y <= BALL.minY + 0.025;
 
   if (ball.bounceCount >= 2) {
-    schedulePointReset(determineWinnerFromDeadBall(), 0.85, 'Double bounce');
+    scheduleRallyResult(determineWinnerFromDeadBall(), 0.85, 'Double bounce');
     return;
   }
 
   if (onFloor && totalSpeed < 0.9 && horizontalSpeed < 0.75) {
-    schedulePointReset(determineWinnerFromDeadBall(), 0.9, 'Ball stopped');
+    scheduleRallyResult(determineWinnerFromDeadBall(), 0.9, 'Ball stopped');
     return;
   }
 
   if (Math.abs(ball.position.z - COURT.netZ) < 0.35 && totalSpeed < 1.15 && onFloor) {
-    schedulePointReset(oppositePlayer(game.lastHitOwner), 0.85, 'Ball died near net');
+    scheduleRallyResult(oppositePlayer(game.lastHitOwner), 0.85, 'Ball died near net');
   }
 }
 
-function schedulePointReset(winner, delay = 0.75, reason = '') {
-  if (game.pendingServer) return;
+function scheduleRallyResult(rallyWinner, delay = 0.75, reason = '') {
+  if (game.pendingServer || game.state === 'gameOver') return;
 
-  if (!winner) winner = 'player';
+  if (!rallyWinner) rallyWinner = 'player';
 
-  if (winner === 'player') {
-    game.playerScore += 1;
+  const serverWonRally = rallyWinner === game.server;
+
+  let scoreChanged = false;
+  let nextServer = game.server;
+  let pointText = '';
+
+  if (serverWonRally) {
+    scoreChanged = true;
+
+    if (rallyWinner === 'player') {
+      game.playerScore += 1;
+    } else {
+      game.aiScore += 1;
+    }
+
+    nextServer = rallyWinner;
+    pointText = '+1 Point';
   } else {
-    game.aiScore += 1;
+    nextServer = rallyWinner;
+    pointText = 'Side Out — serve changes';
   }
 
-  game.pendingServer = winner;
+  updateHud();
+
+  const gameWinner = getGameWinner();
+
+  if (gameWinner) {
+    game.pendingServer = null;
+    game.state = 'gameOver';
+
+    ball.velocity.multiplyScalar(0.25);
+    ball.spin.multiplyScalar(0.25);
+    ball.driveDrop = 0;
+    ball.driveDropDelay = 0;
+
+    if (gameWinner === 'player') {
+      audio.playPointWin();
+    } else {
+      audio.playPointLose();
+    }
+
+    finishGame(gameWinner);
+    return;
+  }
+
+  game.pendingServer = nextServer;
   game.deadBallTimer = delay;
   game.state = 'pointOver';
 
@@ -1562,38 +1860,60 @@ function schedulePointReset(winner, delay = 0.75, reason = '') {
   ball.driveDrop = 0;
   ball.driveDropDelay = 0;
 
-  showPointOverlay(winner, reason);
+  showPointOverlay(
+    rallyWinner,
+    rallyWinner === 'player' ? 'You win the rally' : 'Opponent wins the rally',
+    `${reason}<br>${pointText}<br>Next serve: ${nextServer === 'player' ? 'You' : 'Opponent'}`,
+    scoreChanged
+  );
 
-  if (winner === 'player') {
+  if (rallyWinner === 'player') {
     audio.playPointWin();
   } else {
     audio.playPointLose();
   }
 }
 
-function showPointOverlay(winner, reason = '') {
-  const isPlayer = winner === 'player';
-  const title = isPlayer ? 'YOU WIN THE RALLY' : 'OPPONENT WINS THE RALLY';
-  const serveText = isPlayer ? 'Your serve next' : 'Opponent serves next';
-  const scoreText = `You ${game.playerScore} — ${game.aiScore} Opponent`;
+function showPointOverlay(owner, title, subtitle = '', important = false) {
+  let color = '#ffffff';
+
+  if (owner === 'player') {
+    color = '#38bdf8';
+  } else if (owner === 'ai') {
+    color = '#fb7185';
+  }
 
   pointOverlay.innerHTML = `
-    <div style="font-size: 30px; color: ${isPlayer ? '#38bdf8' : '#fb7185'};">${title}</div>
-    <div style="font-size: 15px; font-weight: 700; margin-top: 8px; color: rgba(255,255,255,0.86);">${reason}</div>
-    <div style="font-size: 18px; margin-top: 10px; color: #ffffff;">+1 Point</div>
-    <div style="font-size: 14px; margin-top: 8px; color: rgba(255,255,255,0.72);">${scoreText}</div>
-    <div style="font-size: 13px; margin-top: 6px; color: rgba(255,255,255,0.64);">${serveText}</div>
+    <div class="point-title" style="color:${color};">${title}</div>
+    <div class="point-subtitle">${subtitle}</div>
+    <div class="point-score">You ${game.playerScore} — ${game.aiScore} Opponent</div>
   `;
 
-  pointOverlay.style.opacity = '1';
-  pointOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+  pointOverlay.classList.add('show');
 
   window.clearTimeout(pointOverlay._hideTimer);
 
   pointOverlay._hideTimer = window.setTimeout(() => {
-    pointOverlay.style.opacity = '0';
-    pointOverlay.style.transform = 'translate(-50%, -50%) scale(0.96)';
-  }, 1350);
+    if (!important) {
+      pointOverlay.classList.remove('show');
+    }
+  }, important ? 2600 : 1400);
+}
+
+function updateHud() {
+  document.querySelector('#playerScore').textContent = game.playerScore;
+  document.querySelector('#aiScore').textContent = game.aiScore;
+  document.querySelector('#serverText').textContent =
+    `Server: ${game.server === 'player' ? 'You' : 'Opponent'}`;
+  document.querySelector('#difficultyText').textContent =
+    DIFFICULTIES[game.difficulty]?.label ?? 'Easy';
+}
+
+function refreshStatsUI() {
+  document.querySelector('#statGames').textContent = stats.gamesPlayed;
+  document.querySelector('#statPlayerWins').textContent = stats.playerWins;
+  document.querySelector('#statAiWins').textContent = stats.aiWins;
+  document.querySelector('#statBestScore').textContent = stats.bestPlayerScore;
 }
 
 function determineWinnerFromDeadBall() {
@@ -1911,29 +2231,9 @@ function createGameAudio() {
     const ctx = ensureContext();
     const now = ctx.currentTime;
 
-    playTone({
-      frequency: 523.25,
-      start: now,
-      duration: 0.08,
-      volume: 0.16,
-      type: 'sine'
-    });
-
-    playTone({
-      frequency: 659.25,
-      start: now + 0.08,
-      duration: 0.08,
-      volume: 0.18,
-      type: 'sine'
-    });
-
-    playTone({
-      frequency: 783.99,
-      start: now + 0.16,
-      duration: 0.16,
-      volume: 0.22,
-      type: 'triangle'
-    });
+    playTone({ frequency: 523.25, start: now, duration: 0.08, volume: 0.16, type: 'sine' });
+    playTone({ frequency: 659.25, start: now + 0.08, duration: 0.08, volume: 0.18, type: 'sine' });
+    playTone({ frequency: 783.99, start: now + 0.16, duration: 0.16, volume: 0.22, type: 'triangle' });
 
     playNoiseBurst({
       duration: 0.09,
@@ -1947,29 +2247,9 @@ function createGameAudio() {
     const ctx = ensureContext();
     const now = ctx.currentTime;
 
-    playTone({
-      frequency: 246.94,
-      start: now,
-      duration: 0.12,
-      volume: 0.2,
-      type: 'sawtooth'
-    });
-
-    playTone({
-      frequency: 196.0,
-      start: now + 0.12,
-      duration: 0.16,
-      volume: 0.18,
-      type: 'triangle'
-    });
-
-    playTone({
-      frequency: 146.83,
-      start: now + 0.26,
-      duration: 0.22,
-      volume: 0.16,
-      type: 'sine'
-    });
+    playTone({ frequency: 246.94, start: now, duration: 0.12, volume: 0.2, type: 'sawtooth' });
+    playTone({ frequency: 196.0, start: now + 0.12, duration: 0.16, volume: 0.18, type: 'triangle' });
+    playTone({ frequency: 146.83, start: now + 0.26, duration: 0.22, volume: 0.16, type: 'sine' });
 
     playNoiseBurst({
       duration: 0.12,
@@ -2036,6 +2316,37 @@ function createGameAudio() {
     playFloorHit,
     playPointWin,
     playPointLose
+  };
+}
+
+function loadStats() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+
+    if (!raw) {
+      return createDefaultStats();
+    }
+
+    return {
+      ...createDefaultStats(),
+      ...JSON.parse(raw)
+    };
+  } catch {
+    return createDefaultStats();
+  }
+}
+
+function saveStats(nextStats) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextStats));
+}
+
+function createDefaultStats() {
+  return {
+    gamesPlayed: 0,
+    playerWins: 0,
+    aiWins: 0,
+    bestPlayerScore: 0,
+    lastGames: []
   };
 }
 

@@ -2,13 +2,17 @@ import * as THREE from 'three';
 
 export class HumanLikePickleballAI {
   constructor(options = {}) {
-    this.baseReaction = options.baseReaction ?? 0.08;
-    this.baseMaxSpeed = options.baseMaxSpeed ?? 7.8;
-    this.sprintSpeed = options.sprintSpeed ?? 11.0;
-    this.acceleration = options.acceleration ?? 22.0;
-    this.deceleration = options.deceleration ?? 18.0;
-    this.skill = options.skill ?? 0.86;
-    this.stamina = options.stamina ?? 0.86;
+    this.baseReaction = options.baseReaction ?? 0.11;
+    this.baseMaxSpeed = options.baseMaxSpeed ?? 6.8;
+    this.sprintSpeed = options.sprintSpeed ?? 9.2;
+    this.acceleration = options.acceleration ?? 16.5;
+    this.deceleration = options.deceleration ?? 14.5;
+    this.skill = options.skill ?? 0.84;
+    this.stamina = options.stamina ?? 0.84;
+    this.mistakeMultiplier = options.mistakeMultiplier ?? 1.0;
+    this.shotPowerMultiplier = options.shotPowerMultiplier ?? 1.0;
+    this.netMistakeChance = options.netMistakeChance ?? 0.04;
+    this.outMistakeChance = options.outMistakeChance ?? 0.04;
 
     this.velocity = new THREE.Vector3();
     this.target = new THREE.Vector3();
@@ -19,8 +23,27 @@ export class HumanLikePickleballAI {
     this.pressure = 0.18;
     this.errorBiasX = 0;
     this.errorBiasZ = 0;
-
     this.lastTargetReason = 'home';
+  }
+
+  configure(options = {}) {
+    this.baseReaction = options.baseReaction ?? this.baseReaction;
+    this.baseMaxSpeed = options.baseMaxSpeed ?? this.baseMaxSpeed;
+    this.sprintSpeed = options.sprintSpeed ?? this.sprintSpeed;
+    this.acceleration = options.acceleration ?? this.acceleration;
+    this.deceleration = options.deceleration ?? this.deceleration;
+    this.skill = options.skill ?? this.skill;
+    this.stamina = options.stamina ?? this.stamina;
+    this.mistakeMultiplier = options.mistakeMultiplier ?? this.mistakeMultiplier;
+    this.shotPowerMultiplier = options.shotPowerMultiplier ?? this.shotPowerMultiplier;
+    this.netMistakeChance = options.netMistakeChance ?? this.netMistakeChance;
+    this.outMistakeChance = options.outMistakeChance ?? this.outMistakeChance;
+
+    this.velocity.set(0, 0, 0);
+    this.target.set(0, 0, 0);
+    this.reactionTimer = 0;
+    this.commitTimer = 0;
+    this.pressure = 0.18;
   }
 
   update({ dt, ball, paddle, court, gameState }) {
@@ -37,7 +60,10 @@ export class HumanLikePickleballAI {
 
     const ballOnAISide = ball.position.z <= 0.35;
     const ballMovingToAI = ball.velocity.z < -0.08;
-    const ballNearNetOnAISide = ball.position.z > limits.forwardZ - 0.85 && ball.position.z < 0.45;
+    const ballNearNetOnAISide =
+      ball.position.z > limits.forwardZ - 0.9 &&
+      ball.position.z < 0.55;
+
     const ballSlow = ball.velocity.length() < 3.1;
 
     const shouldChase =
@@ -57,7 +83,7 @@ export class HumanLikePickleballAI {
         this.target.copy(target);
 
         this.reactionTimer = this.getReactionDelay(ball, ballSlow);
-        this.commitTimer = THREE.MathUtils.randFloat(0.08, 0.22);
+        this.commitTimer = THREE.MathUtils.randFloat(0.08, 0.24);
       }
     } else {
       this.target.x = THREE.MathUtils.lerp(this.target.x, 0, 0.05);
@@ -73,10 +99,6 @@ export class HumanLikePickleballAI {
     return {
       minX: -court.width / 2 + 0.42,
       maxX: court.width / 2 - 0.42,
-
-      // Important:
-      // AI can now move close to the net and far backward.
-      // This fixes slow balls landing near the kitchen/net.
       forwardZ: court.aiForwardMaxZ ?? -1.15,
       backZ: court.aiBackMinZ ?? -(court.halfLength + 0.78),
       homeZ: court.aiPaddleZ ?? -(court.halfLength - 1.45)
@@ -115,14 +137,12 @@ export class HumanLikePickleballAI {
     const fatigue = 1 - this.stamina;
     const pressureDelay = this.pressure * 0.025;
     const fatigueDelay = fatigue * 0.05;
-
-    // If the ball is slow, the AI should react faster and walk forward to it.
     const slowBallBonus = ballSlow ? -0.035 : 0;
 
     return THREE.MathUtils.clamp(
       this.baseReaction + pressureDelay + fatigueDelay + slowBallBonus,
       0.025,
-      0.16
+      0.22
     );
   }
 
@@ -133,14 +153,14 @@ export class HumanLikePickleballAI {
     const predictedTarget = this.predictIntercept(ball, paddle, court);
 
     const ballSlow = ball.velocity.length() < 3.0;
-    const ballNearNet = ball.position.z > limits.forwardZ - 0.75 && ball.position.z < 0.6;
+    const ballNearNet =
+      ball.position.z > limits.forwardZ - 0.75 &&
+      ball.position.z < 0.6;
+
     const ballAlreadyOnAISide = ball.position.z < 0;
 
     let chosen = predictedTarget;
 
-    // Important fix:
-    // For slow balls, dinks, and balls near the net, prediction often waits too deep.
-    // A human would step forward. So AI directly moves toward the ball position.
     if (ballSlow || ballNearNet || ballAlreadyOnAISide) {
       chosen = directTarget;
       this.lastTargetReason = 'direct-chase';
@@ -151,8 +171,13 @@ export class HumanLikePickleballAI {
     const fatigue = 1 - this.stamina;
     const pressureMiss = this.pressure * (1 - this.skill);
 
-    const errorX = THREE.MathUtils.randFloatSpread(0.08 + fatigue * 0.16 + pressureMiss * 0.24);
-    const errorZ = THREE.MathUtils.randFloatSpread(0.08 + fatigue * 0.16 + pressureMiss * 0.24);
+    const errorBase =
+      0.08 +
+      fatigue * 0.16 +
+      pressureMiss * 0.24;
+
+    const errorX = THREE.MathUtils.randFloatSpread(errorBase * this.mistakeMultiplier);
+    const errorZ = THREE.MathUtils.randFloatSpread(errorBase * this.mistakeMultiplier);
 
     chosen.x += errorX;
     chosen.z += errorZ;
@@ -170,18 +195,12 @@ export class HumanLikePickleballAI {
     const target = new THREE.Vector3();
 
     target.x = ball.position.x;
-
-    // Put paddle slightly behind the ball relative to AI side.
-    // If ball is close to net, AI moves forward close to kitchen/net.
-    // If ball is deep, AI moves backward.
     target.z = ball.position.z - 0.18;
 
-    // If the ball is still flying and moving toward AI, meet it a bit earlier.
     if (ball.velocity.z < -0.2) {
       target.z = ball.position.z - 0.35;
     }
 
-    // If ball is almost stopped near net, AI should rush forward.
     if (ball.velocity.length() < 2.2 && ball.position.z > limits.forwardZ - 0.9) {
       target.z = ball.position.z - 0.08;
     }
@@ -218,7 +237,6 @@ export class HumanLikePickleballAI {
         predicted.y = minY;
       }
 
-      // Only target AI side or near-net transition.
       if (predicted.z > 0.65) {
         continue;
       }
@@ -231,7 +249,12 @@ export class HumanLikePickleballAI {
 
       const distance = candidate.distanceTo(paddle.position);
 
-      const staminaSpeed = THREE.MathUtils.lerp(this.baseMaxSpeed * 0.7, this.sprintSpeed, this.stamina);
+      const staminaSpeed = THREE.MathUtils.lerp(
+        this.baseMaxSpeed * 0.7,
+        this.sprintSpeed,
+        this.stamina
+      );
+
       const reachableTime = distance / Math.max(staminaSpeed, 0.001);
 
       const heightPenalty = Math.abs(predicted.y - paddle.position.y) * 0.13;
@@ -282,7 +305,6 @@ export class HumanLikePickleballAI {
       1 - Math.pow(0.001, dt * accel)
     );
 
-    // Human-ish fatigue, but still allows forward/back/side movement.
     const movementFactor = THREE.MathUtils.lerp(0.74, 1.0, 1 - fatigue);
 
     paddle.position.x += this.velocity.x * dt * movementFactor;
@@ -290,7 +312,6 @@ export class HumanLikePickleballAI {
 
     paddle.position.x = THREE.MathUtils.clamp(paddle.position.x, limits.minX, limits.maxX);
     paddle.position.z = THREE.MathUtils.clamp(paddle.position.z, limits.backZ, limits.forwardZ);
-    paddle.position.y = paddle.position.y;
   }
 
   getShotIntent({ ball, paddle, paddleVelocity, court, contactOffsetX = 0, contactOffsetY = 0 }) {
@@ -304,11 +325,14 @@ export class HumanLikePickleballAI {
       contactOffsetY * contactOffsetY
     );
 
-    const contactQuality = THREE.MathUtils.clamp(
+    let contactQuality = THREE.MathUtils.clamp(
       1 - contactDistance * 0.5 - fatigue * 0.18,
       0.22,
       1
     );
+
+    contactQuality -= THREE.MathUtils.randFloat(0, 0.12 * this.mistakeMultiplier);
+    contactQuality = THREE.MathUtils.clamp(contactQuality, 0.16, 1);
 
     const nearNet = paddle.position.z > limits.forwardZ - 0.85;
     const tired = this.stamina < 0.36;
@@ -316,35 +340,64 @@ export class HumanLikePickleballAI {
 
     const wantsSafeLob = tired || highPressure || nearNet;
 
+    const mistakeRoll = Math.random();
+    const makesNetMistake = mistakeRoll < this.netMistakeChance * this.mistakeMultiplier;
+    const makesOutMistake =
+      !makesNetMistake &&
+      mistakeRoll < (this.netMistakeChance + this.outMistakeChance) * this.mistakeMultiplier;
+
     const powerBase = wantsSafeLob
       ? THREE.MathUtils.randFloat(0.42, 0.72)
       : THREE.MathUtils.randFloat(0.58, 1.08);
 
-    const power = THREE.MathUtils.clamp(
-      powerBase * contactQuality * THREE.MathUtils.lerp(0.78, 1.08, this.stamina),
-      0.24,
-      1.12
+    let power = THREE.MathUtils.clamp(
+      powerBase *
+        contactQuality *
+        THREE.MathUtils.lerp(0.78, 1.08, this.stamina) *
+        this.shotPowerMultiplier,
+      0.2,
+      1.16
     );
 
+    if (makesNetMistake) {
+      power *= 0.68;
+    }
+
+    if (makesOutMistake) {
+      power *= 1.18;
+    }
+
     const targetX = THREE.MathUtils.clamp(
-      -paddle.position.x * 0.16 + THREE.MathUtils.randFloatSpread(wantsSafeLob ? 1.4 : 1.9),
+      -paddle.position.x * 0.16 +
+        THREE.MathUtils.randFloatSpread(wantsSafeLob ? 1.4 : 1.9) *
+          this.mistakeMultiplier,
       -court.width / 2 + 0.72,
       court.width / 2 - 0.72
     );
 
-    const targetZ = wantsSafeLob
+    let targetZ = wantsSafeLob
       ? THREE.MathUtils.randFloat(4.7, Math.min(court.halfLength - 0.9, 7.4))
       : THREE.MathUtils.randFloat(5.2, Math.min(court.halfLength - 0.55, 8.0));
+
+    if (makesOutMistake) {
+      targetZ = Math.min(court.halfLength + THREE.MathUtils.randFloat(0.3, 1.1), court.halfLength + 1.2);
+    }
 
     return {
       targetX,
       targetZ,
       power,
       speedBoost: wantsSafeLob ? 0.82 : THREE.MathUtils.randFloat(0.92, 1.1),
-      arcBoost: wantsSafeLob ? THREE.MathUtils.randFloat(0.42, 0.78) : THREE.MathUtils.randFloat(0.12, 0.32),
-      netSafety: wantsSafeLob ? 0.92 : 0.78,
+      arcBoost: makesNetMistake
+        ? THREE.MathUtils.randFloat(-0.18, 0.02)
+        : wantsSafeLob
+          ? THREE.MathUtils.randFloat(0.42, 0.78)
+          : THREE.MathUtils.randFloat(0.12, 0.32),
+      netSafety: makesNetMistake ? 0.18 : wantsSafeLob ? 0.92 : 0.78,
       contactQuality,
-      wantsSafeLob
+      wantsSafeLob,
+      makesNetMistake,
+      makesOutMistake
     };
   }
 
