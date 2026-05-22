@@ -1,0 +1,14 @@
+|-- .gitignore
+|-- .vercel
+    |-- project.json
+    |-- README.txt
+|-- index.html
+|-- LICENSE
+|-- package-lock.json
+|-- package.json
+|-- README.md
+|-- src
+    |-- aiOpponent.js
+    |-- main.js
+    |-- style.css
+|-- vercel.json

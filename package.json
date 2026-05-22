@@ -1,0 +1,17 @@
+{
+  "name": "pickleball-3d-human-ai",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "vercel-build": "vite build"
+  },
+  "dependencies": {
+    "three": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {}
+}
