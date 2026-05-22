@@ -50,6 +50,26 @@ const GAME_RULES = {
   winBy: 2
 };
 
+const CAMERA = {
+  baseX: 0,
+  baseY: 12,
+  baseZ: 15,
+
+  // Lower values = less camera follow and less dizziness.
+  paddleXInfluence: 0.045,
+  paddleZInfluence: 0.16,
+
+  positionSmooth: 0.012,
+  lookSmooth: 0.018,
+
+  lookBaseX: 0,
+  lookBaseY: 0.95,
+  lookBaseZ: 2.2,
+
+  lookPaddleXInfluence: 0.025,
+  lookPaddleZInfluence: -0.18
+};
+
 const DIFFICULTIES = {
   easy: {
     label: 'Easy',
@@ -194,17 +214,26 @@ document.body.appendChild(pointOverlay);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x071225);
-scene.fog = new THREE.Fog(0x071225, 22, 54);
+scene.fog = new THREE.Fog(0x071225, 24, 62);
 
 const camera = new THREE.PerspectiveCamera(
-  70,
+  50,
   window.innerWidth / window.innerHeight,
-  2,
-  50
+  0.1,
+  120
 );
 
-camera.position.set(0, 9.2, 8.5);
-camera.lookAt(0, 1.0, 1.5);
+camera.position.set(CAMERA.baseX, CAMERA.baseY, CAMERA.baseZ);
+camera.lookAt(CAMERA.lookBaseX, CAMERA.lookBaseY, CAMERA.lookBaseZ);
+
+const cameraLookTarget = new THREE.Vector3(
+  CAMERA.lookBaseX,
+  CAMERA.lookBaseY,
+  CAMERA.lookBaseZ
+);
+
+const desiredCameraPosition = new THREE.Vector3();
+const desiredCameraLookTarget = new THREE.Vector3();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -354,6 +383,10 @@ function startNewGame(difficulty) {
 
   updateHud();
   enterServeState('player');
+
+  camera.position.set(CAMERA.baseX, CAMERA.baseY, CAMERA.baseZ);
+  cameraLookTarget.set(CAMERA.lookBaseX, CAMERA.lookBaseY, CAMERA.lookBaseZ);
+  camera.lookAt(cameraLookTarget);
 
   window.setTimeout(() => {
     showPointOverlay('neutral', 'Game Start', 'Your serve first. Drag forward hard to serve.', false);
@@ -969,6 +1002,7 @@ function update(dt) {
 
   if (game.state === 'home' || game.state === 'gameOver') {
     updateDustSystem(dt);
+    updateStableCamera(dt);
     return;
   }
 
@@ -995,10 +1029,33 @@ function update(dt) {
   }
 
   updateDustSystem(dt);
+  updateStableCamera(dt);
+}
 
-  camera.position.x += (playerPaddle.position.x * 0.2 - camera.position.x) * 0.025;
-  camera.position.z += (playerPaddle.position.z + 5.05 - camera.position.z) * 0.018;
-  camera.lookAt(playerPaddle.position.x * 0.12, 1.05, -0.4);
+function updateStableCamera(dt) {
+  desiredCameraPosition.set(
+    CAMERA.baseX + playerPaddle.position.x * CAMERA.paddleXInfluence,
+    CAMERA.baseY,
+    CAMERA.baseZ + (playerPaddle.position.z - COURT.playerServeZ) * CAMERA.paddleZInfluence
+  );
+
+  desiredCameraLookTarget.set(
+    CAMERA.lookBaseX + playerPaddle.position.x * CAMERA.lookPaddleXInfluence,
+    CAMERA.lookBaseY,
+    CAMERA.lookBaseZ + (playerPaddle.position.z - COURT.playerServeZ) * CAMERA.lookPaddleZInfluence
+  );
+
+  camera.position.lerp(
+    desiredCameraPosition,
+    1 - Math.pow(CAMERA.positionSmooth, dt)
+  );
+
+  cameraLookTarget.lerp(
+    desiredCameraLookTarget,
+    1 - Math.pow(CAMERA.lookSmooth, dt)
+  );
+
+  camera.lookAt(cameraLookTarget);
 }
 
 function updatePointResetTimer(dt) {
