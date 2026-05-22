@@ -52,7 +52,7 @@ const GAME_RULES = {
 
 const CAMERA = {
   baseX: 0,
-  baseY: 12,
+  baseY: 11,
   baseZ: 15,
 
   // Lower values = less camera follow and less dizziness.
@@ -125,6 +125,7 @@ const DIFFICULTIES = {
 };
 
 const STORAGE_KEY = 'pickleball_3d_game_stats_v1';
+const POINT_OVERLAY_AUTO_HIDE_MS = 1000;
 
 const stats = loadStats();
 
@@ -211,6 +212,20 @@ const pointOverlay = document.createElement('div');
 pointOverlay.className = 'point-overlay';
 pointOverlay.innerHTML = '';
 document.body.appendChild(pointOverlay);
+
+pointOverlay.addEventListener('pointerdown', (event) => {
+  if (event.target.closest('[data-point-overlay-close]')) {
+    event.preventDefault();
+    hidePointOverlay();
+  }
+}, { passive: false });
+
+pointOverlay.addEventListener('click', (event) => {
+  if (event.target.closest('[data-point-overlay-close]')) {
+    event.preventDefault();
+    hidePointOverlay();
+  }
+});
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x071225);
@@ -1940,7 +1955,13 @@ function scheduleRallyResult(rallyWinner, delay = 0.75, reason = '') {
   }
 }
 
-function showPointOverlay(owner, title, subtitle = '', important = false) {
+function showPointOverlay(
+  owner,
+  title,
+  subtitle = '',
+  important = false,
+  durationMs = POINT_OVERLAY_AUTO_HIDE_MS
+) {
   let color = '#ffffff';
 
   if (owner === 'player') {
@@ -1949,7 +1970,13 @@ function showPointOverlay(owner, title, subtitle = '', important = false) {
     color = '#fb7185';
   }
 
+  window.clearTimeout(pointOverlay._hideTimer);
+
   pointOverlay.innerHTML = `
+    <button class="point-overlay-close" type="button" data-point-overlay-close aria-label="Close">
+      ×
+    </button>
+
     <div class="point-title" style="color:${color};">${title}</div>
     <div class="point-subtitle">${subtitle}</div>
     <div class="point-score">You ${game.playerScore} — ${game.aiScore} Opponent</div>
@@ -1957,14 +1984,23 @@ function showPointOverlay(owner, title, subtitle = '', important = false) {
 
   pointOverlay.classList.add('show');
 
-  window.clearTimeout(pointOverlay._hideTimer);
+  const finalDuration = Number.isFinite(durationMs)
+    ? durationMs
+    : POINT_OVERLAY_AUTO_HIDE_MS;
 
-  pointOverlay._hideTimer = window.setTimeout(() => {
-    if (!important) {
-      pointOverlay.classList.remove('show');
-    }
-  }, important ? 2600 : 1400);
+  if (finalDuration > 0) {
+    pointOverlay._hideTimer = window.setTimeout(() => {
+      hidePointOverlay();
+    }, finalDuration);
+  }
 }
+
+function hidePointOverlay() {
+  window.clearTimeout(pointOverlay._hideTimer);
+  pointOverlay._hideTimer = null;
+  pointOverlay.classList.remove('show');
+}
+
 
 function updateHud() {
   document.querySelector('#playerScore').textContent = game.playerScore;

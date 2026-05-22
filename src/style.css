@@ -308,7 +308,7 @@ canvas {
   z-index: 40;
   min-width: 300px;
   max-width: min(560px, calc(100vw - 32px));
-  padding: 18px 28px;
+  padding: 22px 44px 18px 28px;
   border-radius: 22px;
   color: #ffffff;
   text-align: center;
@@ -324,7 +324,29 @@ canvas {
 
 .point-overlay.show {
   opacity: 1;
+  pointer-events: auto;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.point-overlay-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.point-overlay-close:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .point-title {
@@ -396,12 +418,13 @@ canvas {
   .point-overlay {
     top: 24%;
     min-width: 250px;
-    padding: 16px 20px;
+    padding: 18px 42px 16px 20px;
   }
 
   .point-title {
     font-size: 24px;
   }
+
 }
 
 @media (max-width: 420px) {
