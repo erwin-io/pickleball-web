@@ -203,8 +203,8 @@ const camera = new THREE.PerspectiveCamera(
   50
 );
 
-camera.position.set(0, 9.2, 40);
-camera.lookAt(0, 1.0, 5);
+camera.position.set(0, 9.2, 8.5);
+camera.lookAt(0, 1.0, 1.5);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -996,9 +996,23 @@ function update(dt) {
 
   updateDustSystem(dt);
 
-  camera.position.x += (playerPaddle.position.x * 0.2 - camera.position.x) * 0.025;
-  camera.position.z += (playerPaddle.position.z + 5.05 - camera.position.z) * 0.018;
-  camera.lookAt(playerPaddle.position.x * 0.12, 1.05, -0.4);
+  // Wider third-person camera.
+  // The camera stays farther behind you so you can see where long opponent shots land.
+  const cameraTargetX = playerPaddle.position.x * 0.16;
+  const cameraTargetY = 8.9;
+  const cameraTargetZ = playerPaddle.position.z + 10.8;
+
+  camera.position.x += (cameraTargetX - camera.position.x) * 0.022;
+  camera.position.y += (cameraTargetY - camera.position.y) * 0.018;
+  camera.position.z += (cameraTargetZ - camera.position.z) * 0.018;
+
+  // Look more toward your full court, not only the net.
+  // This makes the landing area on your side more visible.
+  camera.lookAt(
+    playerPaddle.position.x * 0.08,
+    0.95,
+    playerPaddle.position.z - 4.2
+  );
 }
 
 function updatePointResetTimer(dt) {
