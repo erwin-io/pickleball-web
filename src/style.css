@@ -1,7 +1,14 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body {
   margin: 0;
   width: 100%;
+  min-width: 0;
   height: 100%;
   overflow: hidden;
   background: #071225;
@@ -52,30 +59,42 @@ canvas {
   z-index: 50;
   display: grid;
   place-items: center;
-  padding: 24px;
+  width: 100vw;
+  min-width: 0;
+  min-height: 100dvh;
+  padding: clamp(12px, 4vw, 24px);
   background:
     radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 34%),
     radial-gradient(circle at bottom right, rgba(251, 113, 133, 0.18), transparent 34%),
     linear-gradient(135deg, #071225, #111827);
   color: white;
+  overflow-x: hidden;
+  overflow-y: auto;
 
-  touch-action: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
 .home-card {
-  width: min(760px, calc(100vw - 36px));
-  padding: 32px;
-  border-radius: 28px;
+  width: min(760px, 100%);
+  max-width: 100%;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: clamp(20px, 5vw, 32px);
+  border-radius: clamp(22px, 5vw, 28px);
   background: rgba(8, 17, 34, 0.76);
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(18px);
+
+  touch-action: pan-y;
 }
 
 .eyebrow {
   color: #38bdf8;
   font-weight: 800;
-  font-size: 13px;
+  font-size: clamp(11px, 3vw, 13px);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   margin-bottom: 8px;
@@ -83,14 +102,15 @@ canvas {
 
 .home-card h1 {
   margin: 0;
-  font-size: clamp(36px, 6vw, 62px);
-  line-height: 0.95;
+  font-size: clamp(32px, 9vw, 62px);
+  line-height: 0.98;
+  word-break: keep-all;
 }
 
 .home-subtitle {
   margin: 18px 0 26px;
   color: rgba(255, 255, 255, 0.74);
-  font-size: 16px;
+  font-size: clamp(14px, 3.8vw, 16px);
   line-height: 1.5;
 }
 
@@ -151,6 +171,7 @@ canvas {
   min-height: 22px;
   color: rgba(255, 255, 255, 0.68);
   font-size: 14px;
+  line-height: 1.45;
 }
 
 .start-btn {
@@ -181,6 +202,7 @@ canvas {
 }
 
 .stats-panel div {
+  min-width: 0;
   padding: 12px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.07);
@@ -325,13 +347,25 @@ canvas {
   color: rgba(255, 255, 255, 0.68);
 }
 
-@media (max-width: 680px) {
+@media (max-width: 760px) {
+  .home-screen {
+    place-items: start center;
+    padding: 14px;
+  }
+
   .home-card {
+    width: 100%;
+    max-height: calc(100dvh - 28px);
     padding: 24px;
+    border-radius: 24px;
   }
 
   .difficulty-grid {
     grid-template-columns: 1fr;
+  }
+
+  .difficulty-btn {
+    padding: 16px;
   }
 
   .stats-panel {
@@ -339,9 +373,10 @@ canvas {
   }
 
   .game-hud {
-    grid-template-columns: 92px 155px 92px;
+    grid-template-columns: 92px minmax(128px, 155px) 92px;
     gap: 8px;
     top: 10px;
+    max-width: calc(100vw - 12px);
   }
 
   .score-box,
@@ -366,5 +401,42 @@ canvas {
 
   .point-title {
     font-size: 24px;
+  }
+}
+
+@media (max-width: 420px) {
+  .home-screen {
+    padding: 10px;
+  }
+
+  .home-card {
+    max-height: calc(100dvh - 20px);
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .home-card h1 {
+    font-size: clamp(30px, 10vw, 40px);
+  }
+
+  .home-subtitle {
+    margin: 14px 0 22px;
+  }
+
+  .start-btn {
+    padding: 15px 18px;
+    font-size: 18px;
+  }
+
+  .stats-panel {
+    gap: 8px;
+  }
+
+  .stats-panel div {
+    padding: 10px;
+  }
+
+  .stats-panel strong {
+    font-size: 22px;
   }
 }

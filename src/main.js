@@ -35,9 +35,9 @@ const COURT = {
 
 const BALL = {
   radius: 0.16,
-  gravity: -7.25,
-  bounce: 0.68,
-  drag: 0.9955,
+  gravity: -7.45,
+  bounce: 0.66,
+  drag: 0.9965,
   airSpinDrag: 0.01,
   floorFriction: 0.9,
   minY: 0.16,
@@ -53,41 +53,41 @@ const GAME_RULES = {
 const DIFFICULTIES = {
   easy: {
     label: 'Easy',
-    description: 'Best for testing. AI is much slower and makes more mistakes.',
+    description: 'Best for testing. AI is slower, reacts late, and makes more mistakes.',
     ai: {
-      baseReaction: 0.24,
-      baseMaxSpeed: 3.2,
-      sprintSpeed: 4.8,
-      acceleration: 8.5,
-      deceleration: 7.5,
-      skill: 0.42,
-      stamina: 0.58,
-      mistakeMultiplier: 3.4,
-      shotPowerMultiplier: 0.78,
-      netMistakeChance: 0.11,
-      outMistakeChance: 0.12
+      baseReaction: 0.34,
+      baseMaxSpeed: 2.35,
+      sprintSpeed: 3.6,
+      acceleration: 6.8,
+      deceleration: 6.2,
+      skill: 0.34,
+      stamina: 0.5,
+      mistakeMultiplier: 4.2,
+      shotPowerMultiplier: 0.72,
+      netMistakeChance: 0.14,
+      outMistakeChance: 0.14
     }
   },
   normal: {
     label: 'Normal',
-    description: 'Balanced. Easier than the previous AI.',
+    description: 'Balanced. Still easier than the original strong AI.',
     ai: {
-      baseReaction: 0.17,
-      baseMaxSpeed: 5.0,
-      sprintSpeed: 6.8,
-      acceleration: 12.0,
-      deceleration: 10.5,
-      skill: 0.68,
-      stamina: 0.72,
-      mistakeMultiplier: 1.75,
-      shotPowerMultiplier: 0.9,
-      netMistakeChance: 0.075,
-      outMistakeChance: 0.075
+      baseReaction: 0.23,
+      baseMaxSpeed: 3.9,
+      sprintSpeed: 5.35,
+      acceleration: 9.2,
+      deceleration: 8.5,
+      skill: 0.58,
+      stamina: 0.65,
+      mistakeMultiplier: 2.25,
+      shotPowerMultiplier: 0.84,
+      netMistakeChance: 0.095,
+      outMistakeChance: 0.095
     }
   },
   hard: {
     label: 'Hard',
-    description: 'Current strong AI behavior.',
+    description: 'Original strong AI behavior.',
     ai: {
       baseReaction: 0.11,
       baseMaxSpeed: 6.8,
@@ -353,7 +353,6 @@ function startNewGame(difficulty) {
     DIFFICULTIES[difficulty].label;
 
   updateHud();
-
   enterServeState('player');
 
   window.setTimeout(() => {
@@ -778,6 +777,8 @@ function bindInput() {
   renderer.domElement.addEventListener('pointerdown', (event) => {
     if (game.state === 'home' || game.state === 'gameOver') return;
 
+    event.preventDefault();
+
     unlockAudio();
 
     input.dragging = true;
@@ -790,10 +791,12 @@ function bindInput() {
     input.totalPointerMove = 0;
 
     renderer.domElement.setPointerCapture(event.pointerId);
-  });
+  }, { passive: false });
 
   renderer.domElement.addEventListener('pointermove', (event) => {
     if (!input.dragging) return;
+
+    event.preventDefault();
 
     const dx = event.clientX - input.lastX;
     const dy = event.clientY - input.lastY;
@@ -810,9 +813,11 @@ function bindInput() {
     input.desiredPaddle.z += dy * forwardBackSensitivity;
 
     clampDesiredPaddle();
-  });
+  }, { passive: false });
 
   renderer.domElement.addEventListener('pointerup', (event) => {
+    event.preventDefault();
+
     const clickDuration = performance.now() - input.pointerDownTime;
 
     const clickDistance = Math.hypot(
@@ -829,6 +834,10 @@ function bindInput() {
       movePaddleTargetToScreenPoint(event.clientX, event.clientY);
     }
 
+    input.dragging = false;
+  }, { passive: false });
+
+  renderer.domElement.addEventListener('pointercancel', () => {
     input.dragging = false;
   });
 
@@ -1092,19 +1101,19 @@ function launchPlayerServe(rawSwing) {
       -2.65,
       2.65
     ),
-    0.58,
-    THREE.MathUtils.lerp(-4.55, -7.1, THREE.MathUtils.clamp(power, 0, 1))
+    0.52,
+    THREE.MathUtils.lerp(-4.9, -7.35, THREE.MathUtils.clamp(power, 0, 1))
   );
 
   const dz = Math.abs(target.z - ball.position.z);
 
   const travelSpeed = THREE.MathUtils.lerp(
-    5.4,
-    10.8,
+    6.4,
+    13.8,
     THREE.MathUtils.clamp(power / 1.45, 0, 1)
   );
 
-  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.78, 1.7);
+  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.58, 1.35);
 
   const velocity = solveBallisticVelocity({
     start: ball.position,
@@ -1113,22 +1122,22 @@ function launchPlayerServe(rawSwing) {
     gravity: BALL.gravity
   });
 
-  velocity.x += game.playerPaddleVelocity.x * 0.1;
+  velocity.x += game.playerPaddleVelocity.x * 0.12;
 
   velocity.y += THREE.MathUtils.lerp(
-    0.16,
-    0.56,
+    0.08,
+    0.34,
     THREE.MathUtils.clamp(power / 1.45, 0, 1)
   );
 
   velocity.z = -Math.abs(velocity.z);
 
-  ensureNetClearance(velocity, -1, 0.72);
+  ensureNetClearance(velocity, -1, 0.58);
 
   ball.velocity.set(
-    THREE.MathUtils.clamp(velocity.x, -4.8, 4.8),
-    THREE.MathUtils.clamp(velocity.y, 2.25, 6.0),
-    THREE.MathUtils.clamp(velocity.z, -11.2, -5.0)
+    THREE.MathUtils.clamp(velocity.x, -5.6, 5.6),
+    THREE.MathUtils.clamp(velocity.y, 2.1, 5.55),
+    THREE.MathUtils.clamp(velocity.z, -15.3, -6.3)
   );
 
   ball.spin.set(
@@ -1138,8 +1147,8 @@ function launchPlayerServe(rawSwing) {
   );
 
   ball.driveDrop = THREE.MathUtils.lerp(
-    0.55,
-    2.8,
+    0.85,
+    4.2,
     THREE.MathUtils.clamp(power / 1.45, 0, 1)
   );
 
@@ -1278,9 +1287,9 @@ function stepBall(dt) {
   }
 
   if (ball.driveDrop > 0 && ball.driveDropDelay <= 0 && horizontalSpeed > 0.5) {
-    const speedFactor = THREE.MathUtils.clamp(horizontalSpeed / 10.5, 0.18, 1.28);
+    const speedFactor = THREE.MathUtils.clamp(horizontalSpeed / 10.5, 0.18, 1.4);
     ball.velocity.y -= ball.driveDrop * speedFactor * dt;
-    ball.driveDrop = Math.max(0, ball.driveDrop - dt * 1.75);
+    ball.driveDrop = Math.max(0, ball.driveDrop - dt * 1.85);
   }
 
   const speed = ball.velocity.length();
@@ -1290,12 +1299,12 @@ function stepBall(dt) {
       .crossVectors(ball.spin, ball.velocity)
       .multiplyScalar(BALL.airSpinDrag * dt);
 
-    magnus.y = THREE.MathUtils.clamp(magnus.y, -0.055, 0.018);
+    magnus.y = THREE.MathUtils.clamp(magnus.y, -0.06, 0.018);
     ball.velocity.add(magnus);
   }
 
-  if (ball.velocity.y > 3.35) {
-    ball.velocity.y *= Math.pow(0.989, dt * 60);
+  if (ball.velocity.y > 3.15) {
+    ball.velocity.y *= Math.pow(0.987, dt * 60);
   }
 
   ball.velocity.multiplyScalar(Math.pow(BALL.drag, dt * 60));
@@ -1552,17 +1561,17 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
     );
 
   const relativeEnergy =
-    incomingSpeed * 0.095 +
-    forwardSwing * 0.16 +
-    lateralSwing * 0.045 -
-    backwardSwing * 0.055;
+    incomingSpeed * 0.11 +
+    forwardSwing * 0.22 +
+    lateralSwing * 0.055 -
+    backwardSwing * 0.045;
 
-  const staminaFactor = THREE.MathUtils.lerp(0.66, 1.08, PLAYER.stamina);
+  const staminaFactor = THREE.MathUtils.lerp(0.68, 1.12, PLAYER.stamina);
 
   const power = THREE.MathUtils.clamp(
-    0.34 + relativeEnergy * staminaFactor + cleanContact * 0.24,
-    0.28,
-    1.62
+    0.42 + relativeEnergy * staminaFactor + cleanContact * 0.26,
+    0.34,
+    1.85
   );
 
   PLAYER.stamina = THREE.MathUtils.clamp(
@@ -1572,31 +1581,31 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
   );
 
   const isDefensiveBackHit = backwardSwing > forwardSwing * 1.2;
-  const depthByPower = THREE.MathUtils.clamp(power / 1.62, 0, 1);
+  const depthByPower = THREE.MathUtils.clamp(power / 1.85, 0, 1);
 
   const targetZ = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(-3.2, -5.3, depthByPower)
-    : THREE.MathUtils.lerp(-4.75, -7.35, depthByPower);
+    ? THREE.MathUtils.lerp(-3.25, -5.45, depthByPower)
+    : THREE.MathUtils.lerp(-5.05, -7.85, depthByPower);
 
   const targetX = THREE.MathUtils.clamp(
-    playerPaddle.position.x * 0.14 + offsetX * 1.45 + paddleVelocity.x * 0.065,
+    playerPaddle.position.x * 0.16 + offsetX * 1.65 + paddleVelocity.x * 0.085,
     -COURT.width / 2 + 0.45,
     COURT.width / 2 - 0.45
   );
 
-  const targetY = isDefensiveBackHit ? 0.84 : 0.64;
+  const targetY = isDefensiveBackHit ? 0.82 : 0.56;
 
   const target = new THREE.Vector3(targetX, targetY, targetZ);
   const dz = Math.abs(target.z - ball.position.z);
 
   const travelSpeed = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(4.8, 7.4, depthByPower)
-    : THREE.MathUtils.lerp(5.8, 12.4, depthByPower);
+    ? THREE.MathUtils.lerp(5.2, 8.4, depthByPower)
+    : THREE.MathUtils.lerp(7.0, 15.4, depthByPower);
 
   const time = THREE.MathUtils.clamp(
     dz / travelSpeed,
-    0.76,
-    isDefensiveBackHit ? 1.9 : 1.55
+    0.54,
+    isDefensiveBackHit ? 1.75 : 1.32
   );
 
   const velocity = solveBallisticVelocity({
@@ -1606,13 +1615,13 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
     gravity: BALL.gravity
   });
 
-  velocity.x += paddleVelocity.x * 0.11;
+  velocity.x += paddleVelocity.x * 0.14;
 
-  const liftFromContact = THREE.MathUtils.clamp(offsetY * 0.18, -0.04, 0.22);
+  const liftFromContact = THREE.MathUtils.clamp(offsetY * 0.16, -0.05, 0.18);
 
   const liftByPower = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(0.5, 0.3, depthByPower)
-    : THREE.MathUtils.lerp(0.5, 0.12, depthByPower);
+    ? THREE.MathUtils.lerp(0.42, 0.24, depthByPower)
+    : THREE.MathUtils.lerp(0.32, -0.06, depthByPower);
 
   velocity.y += liftFromContact + liftByPower;
   velocity.z = -Math.abs(velocity.z);
@@ -1621,33 +1630,33 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
     velocity,
     direction,
     isDefensiveBackHit
-      ? THREE.MathUtils.lerp(0.78, 0.92, 1 - PLAYER.stamina)
-      : THREE.MathUtils.lerp(0.68, 0.82, 1 - PLAYER.stamina)
+      ? THREE.MathUtils.lerp(0.72, 0.86, 1 - PLAYER.stamina)
+      : THREE.MathUtils.lerp(0.5, 0.68, 1 - PLAYER.stamina)
   );
 
   const minForward = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(3.8, 5.8, depthByPower)
-    : THREE.MathUtils.lerp(5.2, 8.0, depthByPower);
+    ? THREE.MathUtils.lerp(4.1, 6.2, depthByPower)
+    : THREE.MathUtils.lerp(6.5, 9.2, depthByPower);
 
   const maxForward = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(5.4, 8.4, depthByPower)
-    : THREE.MathUtils.lerp(7.4, 13.0, depthByPower);
+    ? THREE.MathUtils.lerp(6.2, 9.0, depthByPower)
+    : THREE.MathUtils.lerp(9.0, 16.5, depthByPower);
 
   ball.velocity.set(
-    THREE.MathUtils.clamp(velocity.x, -5.4, 5.4),
-    THREE.MathUtils.clamp(velocity.y, 2.2, 6.05),
+    THREE.MathUtils.clamp(velocity.x, -6.2, 6.2),
+    THREE.MathUtils.clamp(velocity.y, 2.0, 5.75),
     THREE.MathUtils.clamp(velocity.z, -maxForward, -minForward)
   );
 
   ball.spin.set(
-    THREE.MathUtils.clamp(-offsetY * 0.7 + paddleVelocity.z * -0.035, -1.2, 1.2),
-    THREE.MathUtils.clamp(offsetX * 0.85 + paddleVelocity.x * 0.04, -1.3, 1.3),
-    THREE.MathUtils.clamp(-paddleVelocity.x * 0.03, -0.9, 0.9)
+    THREE.MathUtils.clamp(-offsetY * 0.75 + paddleVelocity.z * -0.04, -1.35, 1.35),
+    THREE.MathUtils.clamp(offsetX * 0.95 + paddleVelocity.x * 0.05, -1.45, 1.45),
+    THREE.MathUtils.clamp(-paddleVelocity.x * 0.035, -1.0, 1.0)
   );
 
   ball.driveDrop = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(0.3, 1.15, depthByPower)
-    : THREE.MathUtils.lerp(1.1, 4.6, depthByPower);
+    ? THREE.MathUtils.lerp(0.4, 1.3, depthByPower)
+    : THREE.MathUtils.lerp(1.55, 5.9, depthByPower);
 
   ball.driveDropDelay = getNetClearDelay(ball.position, ball.velocity, direction);
 
