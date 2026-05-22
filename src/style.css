@@ -6,18 +6,40 @@ body {
   overflow: hidden;
   background: #071225;
   font-family: Arial, Helvetica, sans-serif;
+
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #app {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .game-canvas {
   display: block;
   width: 100vw;
   height: 100vh;
+
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .hidden {
@@ -36,6 +58,8 @@ body {
     radial-gradient(circle at bottom right, rgba(251, 113, 133, 0.18), transparent 34%),
     linear-gradient(135deg, #071225, #111827);
   color: white;
+
+  touch-action: auto;
 }
 
 .home-card {
@@ -94,6 +118,8 @@ body {
   cursor: pointer;
   text-align: left;
   transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+
+  touch-action: manipulation;
 }
 
 .difficulty-btn:hover {
@@ -139,6 +165,8 @@ body {
   background: linear-gradient(135deg, #38bdf8, #a7f3d0);
   cursor: pointer;
   box-shadow: 0 18px 50px rgba(56, 189, 248, 0.25);
+
+  touch-action: manipulation;
 }
 
 .start-btn:hover {
@@ -243,6 +271,8 @@ body {
   color: white;
   background: rgba(255, 255, 255, 0.12);
   cursor: pointer;
+
+  touch-action: manipulation;
 }
 
 #quitGameBtn:hover {
@@ -326,5 +356,15 @@ body {
 
   .center-hud {
     font-size: 11px;
+  }
+
+  .point-overlay {
+    top: 24%;
+    min-width: 250px;
+    padding: 16px 20px;
+  }
+
+  .point-title {
+    font-size: 24px;
   }
 }
