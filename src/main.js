@@ -4,22 +4,36 @@ import './style.css';
 
 const app = document.querySelector('#app');
 
-// app.innerHTML = `
-//   <div class="hud">
-//     <div class="hud-title">3D Pickleball Human-AI POC</div>
-//     <div class="hud-text">
-//       Drag left/right to move sideways. Drag up/down to move forward/back. First serve waits for your swing.
-//     </div>
-//   </div>
-//   <div class="crosshair"></div>
-// `;
+const pointOverlay = document.createElement('div');
+pointOverlay.style.position = 'fixed';
+pointOverlay.style.left = '50%';
+pointOverlay.style.top = '18%';
+pointOverlay.style.transform = 'translate(-50%, -50%) scale(0.96)';
+pointOverlay.style.zIndex = '20';
+pointOverlay.style.padding = '18px 28px';
+pointOverlay.style.borderRadius = '22px';
+pointOverlay.style.fontFamily = 'Arial, Helvetica, sans-serif';
+pointOverlay.style.fontWeight = '900';
+pointOverlay.style.fontSize = '28px';
+pointOverlay.style.letterSpacing = '0.04em';
+pointOverlay.style.textAlign = 'center';
+pointOverlay.style.color = '#ffffff';
+pointOverlay.style.background = 'rgba(8, 17, 34, 0.78)';
+pointOverlay.style.border = '1px solid rgba(255, 255, 255, 0.24)';
+pointOverlay.style.boxShadow = '0 24px 80px rgba(0,0,0,0.42)';
+pointOverlay.style.backdropFilter = 'blur(12px)';
+pointOverlay.style.opacity = '0';
+pointOverlay.style.pointerEvents = 'none';
+pointOverlay.style.transition = 'opacity 180ms ease, transform 180ms ease';
+pointOverlay.innerHTML = '';
+document.body.appendChild(pointOverlay);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x071225);
-scene.fog = new THREE.Fog(0x071225, 18, 42);
+scene.fog = new THREE.Fog(0x071225, 22, 54);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 6.4, 10.7);
+camera.position.set(0, 7.2, 12.5);
 camera.lookAt(0, 1.1, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -32,21 +46,24 @@ app.appendChild(renderer.domElement);
 const clock = new THREE.Clock();
 
 const COURT = {
-  width: 6.1,
-  length: 13.4,
-  halfLength: 6.7,
+  width: 7.2,
+  length: 17.2,
+  halfLength: 8.6,
 
-  playerServeZ: 5.95,
-  playerForwardMinZ: 2.35,
-  playerBackMaxZ: 7.42,
+  playerServeZ: 7.45,
+  playerForwardMinZ: 2.55,
+  playerBackMaxZ: 9.45,
 
-  aiPaddleZ: -5.35,
+  aiPaddleZ: -7.05,
+  aiForwardMaxZ: -2.45,
+  aiBackMinZ: -9.45,
 
   netZ: 0,
   netHeight: 0.9,
 
-  sideOutMargin: 0.46,
-  backOutMargin: 1.35
+  sideOutMargin: 0.52,
+  backOutMargin: 1.45,
+  emergencyOutMargin: 2.8
 };
 
 const BALL = {
@@ -54,7 +71,7 @@ const BALL = {
   gravity: -7.25,
   bounce: 0.68,
   drag: 0.9955,
-  airSpinDrag: 0.018,
+  airSpinDrag: 0.010,
   floorFriction: 0.9,
   minY: 0.16,
   resetCooldown: 0,
@@ -65,7 +82,8 @@ const PLAYER = {
   fixedY: 1.16,
   stamina: 0.86,
   lastSwingPower: 0,
-  serveReadyMinSwing: 2.35
+  serveReadyMinSwing: 5.25,
+  serveMinForwardDistance: 0.34
 };
 
 const input = {
@@ -79,6 +97,15 @@ const game = {
   state: 'waitingServe',
   server: 'player',
   serveTimer: 0,
+
+  deadBallTimer: 0,
+  pendingServer: null,
+
+  serveForwardCharge: 0,
+  serveLockTimer: 0,
+
+  playerScore: 0,
+  aiScore: 0,
 
   lastPlayerPaddlePos: new THREE.Vector3(),
   lastAiPaddlePos: new THREE.Vector3(),
@@ -124,13 +151,13 @@ const ball = createBall();
 scene.add(ball.mesh);
 
 const aiOpponent = new HumanLikePickleballAI({
-  baseReaction: 0.105,
-  baseMaxSpeed: 7.15,
-  sprintSpeed: 9.65,
-  acceleration: 18.0,
-  deceleration: 15.5,
-  skill: 0.82,
-  stamina: 0.82
+  baseReaction: 0.11,
+  baseMaxSpeed: 6.8,
+  sprintSpeed: 9.2,
+  acceleration: 16.5,
+  deceleration: 14.5,
+  skill: 0.84,
+  stamina: 0.84
 });
 
 enterServeState('player');
@@ -145,14 +172,14 @@ function setupLights() {
   key.position.set(-5, 12, 6);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -12;
-  key.shadow.camera.right = 12;
-  key.shadow.camera.top = 14;
-  key.shadow.camera.bottom = -14;
+  key.shadow.camera.left = -14;
+  key.shadow.camera.right = 14;
+  key.shadow.camera.top = 18;
+  key.shadow.camera.bottom = -18;
   scene.add(key);
 
-  const rim = new THREE.PointLight(0x4aa3ff, 18, 24);
-  rim.position.set(0, 3, -8);
+  const rim = new THREE.PointLight(0x4aa3ff, 18, 28);
+  rim.position.set(0, 3, -10);
   scene.add(rim);
 }
 
@@ -166,16 +193,16 @@ function createCourt() {
   floor.position.y = -0.04;
   group.add(floor);
 
-  const kitchenGeo = new THREE.BoxGeometry(COURT.width, 0.085, 2.1);
+  const kitchenGeo = new THREE.BoxGeometry(COURT.width, 0.085, 2.25);
   const kitchenMat = new THREE.MeshStandardMaterial({ color: 0x2778b8, roughness: 0.78 });
 
   const playerKitchen = new THREE.Mesh(kitchenGeo, kitchenMat);
-  playerKitchen.position.set(0, 0.01, 1.05);
+  playerKitchen.position.set(0, 0.01, 1.125);
   playerKitchen.receiveShadow = true;
   group.add(playerKitchen);
 
   const aiKitchen = new THREE.Mesh(kitchenGeo, kitchenMat);
-  aiKitchen.position.set(0, 0.011, -1.05);
+  aiKitchen.position.set(0, 0.011, -1.125);
   aiKitchen.receiveShadow = true;
   group.add(aiKitchen);
 
@@ -184,10 +211,10 @@ function createCourt() {
   addLine(group, 0, 0.045, -COURT.halfLength, COURT.width, 0.06);
   addLine(group, -COURT.width / 2, 0.045, 0, 0.06, COURT.length);
   addLine(group, COURT.width / 2, 0.045, 0, 0.06, COURT.length);
-  addLine(group, 0, 0.045, 2.1, COURT.width, 0.05);
-  addLine(group, 0, 0.045, -2.1, COURT.width, 0.05);
-  addLine(group, 0, 0.046, 4.4, 0.05, 4.6);
-  addLine(group, 0, 0.046, -4.4, 0.05, 4.6);
+  addLine(group, 0, 0.045, 2.25, COURT.width, 0.05);
+  addLine(group, 0, 0.045, -2.25, COURT.width, 0.05);
+  addLine(group, 0, 0.046, 5.35, 0.05, 5.9);
+  addLine(group, 0, 0.046, -5.35, 0.05, 5.9);
 
   const netPostMat = new THREE.MeshStandardMaterial({ color: 0xf0f4ff, roughness: 0.4 });
   const postGeo = new THREE.CylinderGeometry(0.045, 0.045, 1.15, 16);
@@ -258,23 +285,9 @@ function createPaddle({ faceColor, sideColor, handleColor, gripColor, z, name })
   });
   faceGeo.center();
 
-  const outlineMat = new THREE.MeshStandardMaterial({
-    color: 0x050505,
-    roughness: 0.58,
-    metalness: 0.02
-  });
-
-  const sideMat = new THREE.MeshStandardMaterial({
-    color: sideColor,
-    roughness: 0.52,
-    metalness: 0.04
-  });
-
-  const faceMat = new THREE.MeshStandardMaterial({
-    color: faceColor,
-    roughness: 0.46,
-    metalness: 0.04
-  });
+  const outlineMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.58, metalness: 0.02 });
+  const sideMat = new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.52, metalness: 0.04 });
+  const faceMat = new THREE.MeshStandardMaterial({ color: faceColor, roughness: 0.46, metalness: 0.04 });
 
   const outline = new THREE.Mesh(outlineGeo, outlineMat);
   outline.scale.set(1.065, 1.065, 1);
@@ -298,11 +311,7 @@ function createPaddle({ faceColor, sideColor, handleColor, gripColor, z, name })
   group.add(face);
 
   const neckGeo = new THREE.BoxGeometry(0.34, 0.17, 0.18);
-  const neckMat = new THREE.MeshStandardMaterial({
-    color: gripColor,
-    roughness: 0.72,
-    metalness: 0.02
-  });
+  const neckMat = new THREE.MeshStandardMaterial({ color: gripColor, roughness: 0.72, metalness: 0.02 });
 
   const neck = new THREE.Mesh(neckGeo, neckMat);
   neck.position.set(0, -0.83, 0.01);
@@ -310,12 +319,7 @@ function createPaddle({ faceColor, sideColor, handleColor, gripColor, z, name })
   neck.receiveShadow = true;
   group.add(neck);
 
-  const handleMat = new THREE.MeshStandardMaterial({
-    color: handleColor,
-    roughness: 0.82,
-    metalness: 0.04
-  });
-
+  const handleMat = new THREE.MeshStandardMaterial({ color: handleColor, roughness: 0.82, metalness: 0.04 });
   const handleGeo = new THREE.CapsuleGeometry(0.105, 0.72, 10, 22);
   const handle = new THREE.Mesh(handleGeo, handleMat);
   handle.position.set(0, -1.25, 0);
@@ -323,11 +327,7 @@ function createPaddle({ faceColor, sideColor, handleColor, gripColor, z, name })
   handle.receiveShadow = true;
   group.add(handle);
 
-  const gripBandMat = new THREE.MeshStandardMaterial({
-    color: gripColor,
-    roughness: 0.78,
-    metalness: 0.02
-  });
+  const gripBandMat = new THREE.MeshStandardMaterial({ color: gripColor, roughness: 0.78, metalness: 0.02 });
 
   for (let i = 0; i < 4; i++) {
     const bandGeo = new THREE.BoxGeometry(0.25, 0.038, 0.16);
@@ -356,36 +356,24 @@ function createPaddle({ faceColor, sideColor, handleColor, gripColor, z, name })
 
 function createRealPickleballPaddleShape() {
   const s = new THREE.Shape();
-
   s.moveTo(-0.18, -0.78);
-
   s.bezierCurveTo(-0.28, -0.68, -0.43, -0.58, -0.58, -0.5);
   s.bezierCurveTo(-0.76, -0.4, -0.86, -0.22, -0.87, 0.02);
-
   s.lineTo(-0.87, 0.46);
-
   s.bezierCurveTo(-0.87, 0.78, -0.67, 1.0, -0.36, 1.02);
   s.lineTo(0.36, 1.02);
   s.bezierCurveTo(0.67, 1.0, 0.87, 0.78, 0.87, 0.46);
-
   s.lineTo(0.87, 0.02);
-
   s.bezierCurveTo(0.86, -0.22, 0.76, -0.4, 0.58, -0.5);
   s.bezierCurveTo(0.43, -0.58, 0.28, -0.68, 0.18, -0.78);
-
   s.lineTo(-0.18, -0.78);
-
   return s;
 }
 
 function createBall() {
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(BALL.radius, 32, 24),
-    new THREE.MeshStandardMaterial({
-      color: 0xf9f871,
-      roughness: 0.35,
-      emissive: 0x343000
-    })
+    new THREE.MeshStandardMaterial({ color: 0xf9f871, roughness: 0.35, emissive: 0x343000 })
   );
 
   mesh.castShadow = true;
@@ -396,6 +384,12 @@ function createBall() {
     position: mesh.position,
     velocity: new THREE.Vector3(),
     spin: new THREE.Vector3(),
+    driveDrop: 0,
+    driveDropDelay: 0,
+    bounceCount: 0,
+    firstBounceChecked: false,
+    firstBounceIn: false,
+    firstBouncePosition: new THREE.Vector3(),
     gravity: BALL.gravity
   };
 }
@@ -404,14 +398,17 @@ function enterServeState(server) {
   game.state = 'waitingServe';
   game.server = server;
   game.serveTimer = server === 'ai' ? 0.9 : 0;
+  game.deadBallTimer = 0;
+  game.pendingServer = null;
   game.lastHitOwner = null;
   game.rallyHits = 0;
+  game.serveForwardCharge = 0;
+  game.serveLockTimer = 0.3;
 
-  BALL.resetCooldown = 0.2;
-  BALL.hitCooldown = 0.12;
+  BALL.resetCooldown = 0.22;
+  BALL.hitCooldown = 0.16;
 
-  ball.velocity.set(0, 0, 0);
-  ball.spin.set(0, 0, 0);
+  resetBallRallyState();
 
   if (server === 'player') {
     input.desiredPaddle.set(0, PLAYER.fixedY, COURT.playerServeZ);
@@ -423,12 +420,26 @@ function enterServeState(server) {
   }
 }
 
+function resetBallRallyState() {
+  ball.velocity.set(0, 0, 0);
+  ball.spin.set(0, 0, 0);
+  ball.driveDrop = 0;
+  ball.driveDropDelay = 0;
+  ball.bounceCount = 0;
+  ball.firstBounceChecked = false;
+  ball.firstBounceIn = false;
+  ball.firstBouncePosition.set(0, 0, 0);
+}
+
+function resetFirstBounceForNewShot() {
+  ball.bounceCount = 0;
+  ball.firstBounceChecked = false;
+  ball.firstBounceIn = false;
+  ball.firstBouncePosition.set(0, 0, 0);
+}
+
 function placeBallForPlayerServe() {
-  ball.position.set(
-    playerPaddle.position.x,
-    PLAYER.fixedY + 0.02,
-    playerPaddle.position.z - 0.72
-  );
+  ball.position.set(playerPaddle.position.x, PLAYER.fixedY + 0.02, playerPaddle.position.z - 0.72);
 }
 
 function bindInput() {
@@ -436,7 +447,6 @@ function bindInput() {
 
   renderer.domElement.addEventListener('pointerdown', (event) => {
     unlockAudio();
-
     input.dragging = true;
     input.lastX = event.clientX;
     input.lastY = event.clientY;
@@ -452,24 +462,15 @@ function bindInput() {
     input.lastX = event.clientX;
     input.lastY = event.clientY;
 
-    const xSensitivity = 0.0125;
-    const forwardBackSensitivity = 0.021;
+    const xSensitivity = 0.014;
+    const forwardBackSensitivity = 0.024;
 
     input.desiredPaddle.x += dx * xSensitivity;
     input.desiredPaddle.z += dy * forwardBackSensitivity;
 
-    input.desiredPaddle.x = THREE.MathUtils.clamp(
-      input.desiredPaddle.x,
-      -COURT.width / 2 + 0.45,
-      COURT.width / 2 - 0.45
-    );
-
+    input.desiredPaddle.x = THREE.MathUtils.clamp(input.desiredPaddle.x, -COURT.width / 2 + 0.45, COURT.width / 2 - 0.45);
     input.desiredPaddle.y = PLAYER.fixedY;
-    input.desiredPaddle.z = THREE.MathUtils.clamp(
-      input.desiredPaddle.z,
-      COURT.playerForwardMinZ,
-      COURT.playerBackMaxZ
-    );
+    input.desiredPaddle.z = THREE.MathUtils.clamp(input.desiredPaddle.z, COURT.playerForwardMinZ, COURT.playerBackMaxZ);
   });
 
   window.addEventListener('pointerup', () => {
@@ -480,7 +481,9 @@ function bindInput() {
     unlockAudio();
 
     if (event.code === 'Space' && game.state === 'waitingServe' && game.server === 'player') {
-      launchPlayerServe(0.75);
+      placeBallForPlayerServe();
+      game.serveForwardCharge = 0;
+      game.serveLockTimer = 0.25;
     }
   });
 
@@ -512,16 +515,9 @@ function update(dt) {
 
   playerPaddle.position.lerp(input.desiredPaddle, 1 - Math.pow(0.0007, dt));
   playerPaddle.position.y = PLAYER.fixedY;
-  playerPaddle.position.z = THREE.MathUtils.clamp(
-    playerPaddle.position.z,
-    COURT.playerForwardMinZ,
-    COURT.playerBackMaxZ
-  );
+  playerPaddle.position.z = THREE.MathUtils.clamp(playerPaddle.position.z, COURT.playerForwardMinZ, COURT.playerBackMaxZ);
 
-  game.playerPaddleVelocity
-    .copy(playerPaddle.position)
-    .sub(game.lastPlayerPaddlePos)
-    .divideScalar(Math.max(dt, 0.0001));
+  game.playerPaddleVelocity.copy(playerPaddle.position).sub(game.lastPlayerPaddlePos).divideScalar(Math.max(dt, 0.0001));
 
   updatePlayerEnergy(dt);
 
@@ -535,15 +531,16 @@ function update(dt) {
     gameState: game.state
   });
 
-  game.aiPaddleVelocity
-    .copy(aiPaddle.position)
-    .sub(game.lastAiPaddlePos)
-    .divideScalar(Math.max(dt, 0.0001));
+  game.aiPaddleVelocity.copy(aiPaddle.position).sub(game.lastAiPaddlePos).divideScalar(Math.max(dt, 0.0001));
 
   updatePaddleVisual(playerPaddle, game.playerPaddleVelocity, true, dt);
   updatePaddleVisual(aiPaddle, game.aiPaddleVelocity, false, dt);
 
-  if (game.state === 'waitingServe') {
+  if (game.pendingServer) {
+    game.previousBallPosition.copy(ball.position);
+    stepBall(dt);
+    updatePointResetTimer(dt);
+  } else if (game.state === 'waitingServe') {
     updateServeState(dt);
   } else {
     game.previousBallPosition.copy(ball.position);
@@ -553,26 +550,63 @@ function update(dt) {
     checkPaddleCollision(playerPaddle, game.playerPaddleVelocity, 'player');
     checkPaddleCollision(aiPaddle, game.aiPaddleVelocity, 'ai');
     checkNetCollision();
-    checkOutOfBounds();
+
+    const alreadyReset = checkOutOfBounds();
+    if (!alreadyReset) {
+      checkDeadBallAndReset(dt);
+    }
   }
 
   updateDustSystem(dt);
 
   camera.position.x += (playerPaddle.position.x * 0.2 - camera.position.x) * 0.025;
-  camera.position.z += (playerPaddle.position.z + 4.85 - camera.position.z) * 0.018;
-  camera.lookAt(playerPaddle.position.x * 0.12, 1.05, 0);
+  camera.position.z += (playerPaddle.position.z + 5.05 - camera.position.z) * 0.018;
+  camera.lookAt(playerPaddle.position.x * 0.12, 1.05, -0.4);
+}
+
+function updatePointResetTimer(dt) {
+  game.deadBallTimer -= dt;
+
+  if (game.deadBallTimer <= 0) {
+    const nextServer = game.pendingServer || 'player';
+    enterServeState(nextServer);
+  }
 }
 
 function updateServeState(dt) {
   if (game.server === 'player') {
     placeBallForPlayerServe();
 
-    const forwardSwing = Math.max(0, -game.playerPaddleVelocity.z);
-    const sideSwing = Math.abs(game.playerPaddleVelocity.x);
-    const serveSwing = forwardSwing + sideSwing * 0.22;
+    game.serveLockTimer = Math.max(0, game.serveLockTimer - dt);
 
-    if (serveSwing > PLAYER.serveReadyMinSwing) {
-      launchPlayerServe(serveSwing);
+    const forwardSwing = Math.max(0, -game.playerPaddleVelocity.z);
+    const backwardSwing = Math.max(0, game.playerPaddleVelocity.z);
+    const sideSwing = Math.abs(game.playerPaddleVelocity.x);
+
+    if (game.serveLockTimer > 0) {
+      game.serveForwardCharge = 0;
+      return;
+    }
+
+    if (backwardSwing > 0.8) {
+      game.serveForwardCharge *= 0.45;
+    }
+
+    if (forwardSwing > 0.8) {
+      game.serveForwardCharge += forwardSwing * dt;
+    } else {
+      game.serveForwardCharge *= Math.pow(0.55, dt * 60);
+    }
+
+    game.serveForwardCharge = THREE.MathUtils.clamp(game.serveForwardCharge, 0, 1.35);
+
+    const effortSwing = forwardSwing + game.serveForwardCharge * 3.2 + sideSwing * 0.12;
+
+    const enoughSpeed = forwardSwing > PLAYER.serveReadyMinSwing;
+    const enoughDistance = game.serveForwardCharge > PLAYER.serveMinForwardDistance;
+
+    if (enoughSpeed && enoughDistance) {
+      launchPlayerServe(effortSwing);
     }
 
     return;
@@ -587,49 +621,46 @@ function updateServeState(dt) {
 
 function launchPlayerServe(rawSwing) {
   game.state = 'rally';
+  game.deadBallTimer = 0;
+  game.pendingServer = null;
+  game.serveForwardCharge = 0;
+  game.serveLockTimer = 0;
   BALL.hitCooldown = 0.18;
   game.lastHitOwner = 'player';
   game.rallyHits = 1;
 
-  const swingPower = THREE.MathUtils.clamp(rawSwing / 9.0, 0.32, 1.15);
+  const swingPower = THREE.MathUtils.clamp(rawSwing / 11.5, 0.28, 1.15);
   const staminaFactor = THREE.MathUtils.lerp(0.68, 1.08, PLAYER.stamina);
-  const power = THREE.MathUtils.clamp(0.48 + swingPower * staminaFactor, 0.5, 1.45);
+  const power = THREE.MathUtils.clamp(0.38 + swingPower * staminaFactor, 0.38, 1.45);
 
-  PLAYER.stamina = THREE.MathUtils.clamp(PLAYER.stamina - 0.035 - power * 0.04, 0.16, 1);
+  PLAYER.stamina = THREE.MathUtils.clamp(PLAYER.stamina - 0.03 - power * 0.035, 0.16, 1);
 
-  ball.position.set(
-    playerPaddle.position.x,
-    PLAYER.fixedY + 0.02,
-    playerPaddle.position.z - 0.52
-  );
+  resetFirstBounceForNewShot();
+
+  ball.position.set(playerPaddle.position.x, PLAYER.fixedY + 0.02, playerPaddle.position.z - 0.52);
 
   const target = new THREE.Vector3(
-    THREE.MathUtils.clamp(playerPaddle.position.x * 0.25 + game.playerPaddleVelocity.x * 0.06, -2.35, 2.35),
-    0.5,
-    THREE.MathUtils.lerp(-3.95, -5.55, THREE.MathUtils.clamp(power, 0, 1))
+    THREE.MathUtils.clamp(playerPaddle.position.x * 0.25 + game.playerPaddleVelocity.x * 0.06, -2.65, 2.65),
+    0.58,
+    THREE.MathUtils.lerp(-4.55, -7.1, THREE.MathUtils.clamp(power, 0, 1))
   );
 
   const dz = Math.abs(target.z - ball.position.z);
-  const travelSpeed = THREE.MathUtils.lerp(5.8, 10.8, THREE.MathUtils.clamp(power / 1.45, 0, 1));
-  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.72, 1.55);
+  const travelSpeed = THREE.MathUtils.lerp(5.4, 10.8, THREE.MathUtils.clamp(power / 1.45, 0, 1));
+  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.78, 1.7);
 
-  const velocity = solveBallisticVelocity({
-    start: ball.position,
-    target,
-    time,
-    gravity: BALL.gravity
-  });
+  const velocity = solveBallisticVelocity({ start: ball.position, target, time, gravity: BALL.gravity });
 
   velocity.x += game.playerPaddleVelocity.x * 0.1;
-  velocity.y += THREE.MathUtils.lerp(0.1, 0.58, THREE.MathUtils.clamp(power / 1.45, 0, 1));
+  velocity.y += THREE.MathUtils.lerp(0.16, 0.56, THREE.MathUtils.clamp(power / 1.45, 0, 1));
   velocity.z = -Math.abs(velocity.z);
 
-  ensureNetClearance(velocity, -1, 0.5);
+  ensureNetClearance(velocity, -1, 0.72);
 
   ball.velocity.set(
     THREE.MathUtils.clamp(velocity.x, -4.8, 4.8),
-    THREE.MathUtils.clamp(velocity.y, 2.2, 6.2),
-    THREE.MathUtils.clamp(velocity.z, -11.5, -5.6)
+    THREE.MathUtils.clamp(velocity.y, 2.25, 6.0),
+    THREE.MathUtils.clamp(velocity.z, -11.2, -5.0)
   );
 
   ball.spin.set(
@@ -638,57 +669,54 @@ function launchPlayerServe(rawSwing) {
     THREE.MathUtils.clamp(game.playerPaddleVelocity.x * -0.04, -0.8, 0.8)
   );
 
+  ball.driveDrop = THREE.MathUtils.lerp(0.55, 2.8, THREE.MathUtils.clamp(power / 1.45, 0, 1));
+  ball.driveDropDelay = getNetClearDelay(ball.position, ball.velocity, -1);
+
   animatePaddleHit(playerPaddle, power, 'player');
   spawnHitDust(ball.position, power, 1);
-  audio.playPaddleHit({
-    power,
-    distance: 0.4,
-    isPlayer: true
-  });
+  audio.playPaddleHit({ power, distance: 0.4, isPlayer: true });
 }
 
 function launchAIServe() {
   game.state = 'rally';
+  game.deadBallTimer = 0;
+  game.pendingServer = null;
   BALL.hitCooldown = 0.18;
   game.lastHitOwner = 'ai';
   game.rallyHits = 1;
 
+  resetFirstBounceForNewShot();
+
   ball.position.set(aiPaddle.position.x, 1.22, COURT.aiPaddleZ + 0.55);
 
   const target = new THREE.Vector3(
-    THREE.MathUtils.clamp(aiPaddle.position.x * 0.15 + randomSpread(0.95), -2.25, 2.25),
-    0.5,
-    THREE.MathUtils.randFloat(4.1, 5.45)
+    THREE.MathUtils.clamp(aiPaddle.position.x * 0.15 + randomSpread(1.05), -2.55, 2.55),
+    0.58,
+    THREE.MathUtils.randFloat(5.0, 7.0)
   );
 
   const dz = Math.abs(target.z - ball.position.z);
-  const time = THREE.MathUtils.clamp(dz / THREE.MathUtils.randFloat(6.2, 8.4), 0.8, 1.55);
+  const time = THREE.MathUtils.clamp(dz / THREE.MathUtils.randFloat(6.2, 8.6), 0.82, 1.65);
 
-  const velocity = solveBallisticVelocity({
-    start: ball.position,
-    target,
-    time,
-    gravity: BALL.gravity
-  });
+  const velocity = solveBallisticVelocity({ start: ball.position, target, time, gravity: BALL.gravity });
 
   velocity.z = Math.abs(velocity.z);
-  ensureNetClearance(velocity, 1, 0.56);
+  velocity.y += 0.24;
+  ensureNetClearance(velocity, 1, 0.78);
 
   ball.velocity.set(
     THREE.MathUtils.clamp(velocity.x, -3.8, 3.8),
-    THREE.MathUtils.clamp(velocity.y, 2.35, 5.8),
-    THREE.MathUtils.clamp(velocity.z, 5.8, 9.5)
+    THREE.MathUtils.clamp(velocity.y, 2.45, 5.9),
+    THREE.MathUtils.clamp(velocity.z, 5.6, 9.3)
   );
 
   ball.spin.set(randomSpread(0.25), randomSpread(0.3), randomSpread(0.35));
+  ball.driveDrop = 0.85;
+  ball.driveDropDelay = getNetClearDelay(ball.position, ball.velocity, 1);
 
   animatePaddleHit(aiPaddle, 0.75, 'ai');
   spawnHitDust(ball.position, 0.75, -1);
-  audio.playPaddleHit({
-    power: 0.75,
-    distance: distanceFromPlayer(ball.position),
-    isPlayer: false
-  });
+  audio.playPaddleHit({ power: 0.75, distance: distanceFromPlayer(ball.position), isPlayer: false });
 }
 
 function updatePlayerEnergy(dt) {
@@ -740,19 +768,34 @@ function animatePaddleHit(paddle, power, owner) {
 }
 
 function stepBall(dt) {
+  const horizontalSpeed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.z * ball.velocity.z);
+
   ball.velocity.y += ball.gravity * dt;
 
-  const speed = ball.velocity.length();
-  if (speed > 0.001) {
-    const magnus = new THREE.Vector3()
-      .crossVectors(ball.spin, ball.velocity)
-      .multiplyScalar(BALL.airSpinDrag * dt);
+  if (ball.driveDropDelay > 0) {
+    ball.driveDropDelay = Math.max(0, ball.driveDropDelay - dt);
+  }
 
+  if (ball.driveDrop > 0 && ball.driveDropDelay <= 0 && horizontalSpeed > 0.5) {
+    const speedFactor = THREE.MathUtils.clamp(horizontalSpeed / 10.5, 0.18, 1.28);
+    ball.velocity.y -= ball.driveDrop * speedFactor * dt;
+    ball.driveDrop = Math.max(0, ball.driveDrop - dt * 1.75);
+  }
+
+  const speed = ball.velocity.length();
+
+  if (speed > 0.001) {
+    const magnus = new THREE.Vector3().crossVectors(ball.spin, ball.velocity).multiplyScalar(BALL.airSpinDrag * dt);
+    magnus.y = THREE.MathUtils.clamp(magnus.y, -0.055, 0.018);
     ball.velocity.add(magnus);
   }
 
+  if (ball.velocity.y > 3.35) {
+    ball.velocity.y *= Math.pow(0.989, dt * 60);
+  }
+
   ball.velocity.multiplyScalar(Math.pow(BALL.drag, dt * 60));
-  ball.spin.multiplyScalar(Math.pow(0.985, dt * 60));
+  ball.spin.multiplyScalar(Math.pow(0.982, dt * 60));
 
   ball.position.addScaledVector(ball.velocity, dt);
 
@@ -763,22 +806,35 @@ function stepBall(dt) {
     ball.position.y = BALL.minY;
 
     if (ball.velocity.y < 0) {
-      ball.velocity.y = -ball.velocity.y * BALL.bounce;
+      ball.bounceCount += 1;
 
+      if (!ball.firstBounceChecked) {
+        ball.firstBounceChecked = true;
+        ball.firstBouncePosition.copy(impactPosition);
+        ball.firstBounceIn = isLandingInCourt(impactPosition);
+
+        if (!ball.firstBounceIn) {
+          const winner = oppositePlayer(game.lastHitOwner);
+          const reason = getOutReasonFromLanding(impactPosition, game.lastHitOwner);
+          schedulePointReset(winner, 0.95, reason);
+          return;
+        }
+      }
+
+      ball.velocity.y = -ball.velocity.y * BALL.bounce;
       ball.velocity.x *= BALL.floorFriction;
       ball.velocity.z *= BALL.floorFriction;
 
-      ball.spin.x *= 0.78;
-      ball.spin.y *= 0.78;
-      ball.spin.z *= 0.82;
+      ball.spin.x *= 0.74;
+      ball.spin.y *= 0.74;
+      ball.spin.z *= 0.78;
+      ball.driveDrop *= 0.25;
+      ball.driveDropDelay = 0;
 
       if (impactSpeed > 0.75) {
         const floorPower = THREE.MathUtils.clamp(impactSpeed / 6.2, 0.18, 1.15);
         spawnFloorDust(impactPosition, floorPower);
-        audio.playFloorHit({
-          power: floorPower,
-          distance: distanceFromPlayer(impactPosition)
-        });
+        audio.playFloorHit({ power: floorPower, distance: distanceFromPlayer(impactPosition) });
       }
 
       if (Math.abs(ball.velocity.y) < 0.55 && Math.abs(ball.velocity.z) < 1.2) {
@@ -789,6 +845,37 @@ function stepBall(dt) {
 
   ball.mesh.rotation.x += ball.velocity.z * dt * 2.2;
   ball.mesh.rotation.z -= ball.velocity.x * dt * 2.2;
+}
+
+function isLandingInCourt(position) {
+  const halfW = COURT.width / 2;
+  const halfL = COURT.halfLength;
+  const lineTolerance = 0.08;
+
+  return (
+    Math.abs(position.x) <= halfW + lineTolerance &&
+    position.z >= -halfL - lineTolerance &&
+    position.z <= halfL + lineTolerance
+  );
+}
+
+function getOutReasonFromLanding(position, owner) {
+  const halfW = COURT.width / 2;
+  const halfL = COURT.halfLength;
+
+  if (Math.abs(position.x) > halfW + 0.08) {
+    return `${playerLabel(owner)} hit wide`;
+  }
+
+  if (owner === 'player' && position.z < -halfL - 0.08) {
+    return 'You hit long';
+  }
+
+  if (owner === 'ai' && position.z > halfL + 0.08) {
+    return 'Opponent hit long';
+  }
+
+  return `${playerLabel(owner)} hit out`;
 }
 
 function checkPaddleCollision(paddle, paddleVelocity, owner) {
@@ -816,12 +903,7 @@ function checkPaddleCollision(paddle, paddleVelocity, owner) {
   let local;
 
   if (crossedPlane) {
-    const t = THREE.MathUtils.clamp(
-      (planeZ - previous.z) / (current.z - previous.z || 0.0001),
-      0,
-      1
-    );
-
+    const t = THREE.MathUtils.clamp((planeZ - previous.z) / (current.z - previous.z || 0.0001), 0, 1);
     contactPoint = previous.clone().lerp(current, t);
     local = contactPoint.clone().sub(paddle.position);
   } else {
@@ -841,6 +923,8 @@ function checkPaddleCollision(paddle, paddleVelocity, owner) {
   game.lastHitOwner = owner;
   game.rallyHits += 1;
   BALL.hitCooldown = 0.15;
+
+  resetFirstBounceForNewShot();
 
   const offsetX = THREE.MathUtils.clamp(local.x / paddleHalfW, -1, 1);
   const offsetY = THREE.MathUtils.clamp(local.y / paddleHalfH, -1, 1);
@@ -866,36 +950,27 @@ function applyAIHumanReturnShot({ direction, offsetX, offsetY, paddleVelocity })
     contactOffsetY: offsetY
   });
 
-  const target = new THREE.Vector3(
-    intent.targetX,
-    intent.wantsSafeLob ? 0.72 : 0.5,
-    intent.targetZ
-  );
+  const target = new THREE.Vector3(intent.targetX, intent.wantsSafeLob ? 0.78 : 0.58, intent.targetZ);
 
   const dz = Math.abs(target.z - ball.position.z);
   const baseTravelSpeed = THREE.MathUtils.lerp(6.2, 10.2, intent.power) * intent.speedBoost;
-  const time = THREE.MathUtils.clamp(dz / baseTravelSpeed, 0.76, 1.58);
+  const time = THREE.MathUtils.clamp(dz / baseTravelSpeed, 0.78, 1.64);
 
-  const velocity = solveBallisticVelocity({
-    start: ball.position,
-    target,
-    time,
-    gravity: BALL.gravity
-  });
+  const velocity = solveBallisticVelocity({ start: ball.position, target, time, gravity: BALL.gravity });
 
   velocity.x += paddleVelocity.x * 0.045;
-  velocity.y += intent.arcBoost;
+  velocity.y += intent.arcBoost + (intent.wantsSafeLob ? 0.18 : 0.1);
   velocity.z = Math.abs(velocity.z) * direction;
 
-  ensureNetClearance(velocity, direction, intent.netSafety);
+  ensureNetClearance(velocity, direction, intent.wantsSafeLob ? 0.86 : 0.74);
 
   const quality = intent.contactQuality;
-  const maxZ = THREE.MathUtils.lerp(7.4, 11.2, intent.power);
-  const minZ = THREE.MathUtils.lerp(5.4, 7.0, quality);
+  const maxZ = THREE.MathUtils.lerp(7.2, 10.8, intent.power);
+  const minZ = THREE.MathUtils.lerp(5.2, 6.8, quality);
 
   ball.velocity.set(
     THREE.MathUtils.clamp(velocity.x, -4.3, 4.3),
-    THREE.MathUtils.clamp(velocity.y, 2.2, 6.35),
+    THREE.MathUtils.clamp(velocity.y, 2.35, 6.2),
     direction > 0
       ? THREE.MathUtils.clamp(velocity.z, minZ, maxZ)
       : THREE.MathUtils.clamp(velocity.z, -maxZ, -minZ)
@@ -907,14 +982,16 @@ function applyAIHumanReturnShot({ direction, offsetX, offsetY, paddleVelocity })
     THREE.MathUtils.clamp(-offsetX * 0.55, -0.9, 0.9)
   );
 
+  ball.driveDrop = intent.wantsSafeLob
+    ? THREE.MathUtils.lerp(0.12, 0.55, intent.power)
+    : THREE.MathUtils.lerp(0.75, 3.0, intent.power);
+
+  ball.driveDropDelay = getNetClearDelay(ball.position, ball.velocity, direction);
+
   const hitPower = THREE.MathUtils.clamp(intent.power * (0.65 + quality * 0.5), 0.18, 1.35);
   animatePaddleHit(aiPaddle, hitPower, 'ai');
   spawnHitDust(ball.position, hitPower, -1);
-  audio.playPaddleHit({
-    power: hitPower,
-    distance: distanceFromPlayer(ball.position),
-    isPlayer: false
-  });
+  audio.playPaddleHit({ power: hitPower, distance: distanceFromPlayer(ball.position), isPlayer: false });
 }
 
 function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity }) {
@@ -923,13 +1000,7 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
   const backwardSwing = Math.max(0, paddleVelocity.z);
   const lateralSwing = Math.abs(paddleVelocity.x);
 
-  const cleanContact =
-    1 -
-    THREE.MathUtils.clamp(
-      Math.sqrt(offsetX * offsetX + offsetY * offsetY) / 1.25,
-      0,
-      1
-    );
+  const cleanContact = 1 - THREE.MathUtils.clamp(Math.sqrt(offsetX * offsetX + offsetY * offsetY) / 1.25, 0, 1);
 
   const relativeEnergy =
     incomingSpeed * 0.095 +
@@ -939,11 +1010,7 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
 
   const staminaFactor = THREE.MathUtils.lerp(0.66, 1.08, PLAYER.stamina);
 
-  const power = THREE.MathUtils.clamp(
-    0.34 + relativeEnergy * staminaFactor + cleanContact * 0.24,
-    0.28,
-    1.62
-  );
+  const power = THREE.MathUtils.clamp(0.34 + relativeEnergy * staminaFactor + cleanContact * 0.24, 0.28, 1.62);
 
   PLAYER.stamina = THREE.MathUtils.clamp(
     PLAYER.stamina - 0.018 - THREE.MathUtils.clamp(power, 0, 1.4) * 0.042,
@@ -952,11 +1019,11 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
   );
 
   const isDefensiveBackHit = backwardSwing > forwardSwing * 1.2;
-
   const depthByPower = THREE.MathUtils.clamp(power / 1.62, 0, 1);
+
   const targetZ = isDefensiveBackHit
-    ? THREE.MathUtils.lerp(-2.9, -4.4, depthByPower)
-    : THREE.MathUtils.lerp(-3.8, -6.05, depthByPower);
+    ? THREE.MathUtils.lerp(-3.2, -5.3, depthByPower)
+    : THREE.MathUtils.lerp(-4.75, -7.35, depthByPower);
 
   const targetX = THREE.MathUtils.clamp(
     playerPaddle.position.x * 0.14 + offsetX * 1.45 + paddleVelocity.x * 0.065,
@@ -964,7 +1031,7 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
     COURT.width / 2 - 0.45
   );
 
-  const targetY = isDefensiveBackHit ? 0.72 : 0.48;
+  const targetY = isDefensiveBackHit ? 0.84 : 0.64;
 
   const target = new THREE.Vector3(targetX, targetY, targetZ);
   const dz = Math.abs(target.z - ball.position.z);
@@ -973,54 +1040,57 @@ function applyPlayerPhysicsShot({ direction, offsetX, offsetY, paddleVelocity })
     ? THREE.MathUtils.lerp(4.8, 7.4, depthByPower)
     : THREE.MathUtils.lerp(5.8, 12.4, depthByPower);
 
-  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.72, isDefensiveBackHit ? 1.85 : 1.48);
+  const time = THREE.MathUtils.clamp(dz / travelSpeed, 0.76, isDefensiveBackHit ? 1.9 : 1.55);
 
-  const velocity = solveBallisticVelocity({
-    start: ball.position,
-    target,
-    time,
-    gravity: BALL.gravity
-  });
+  const velocity = solveBallisticVelocity({ start: ball.position, target, time, gravity: BALL.gravity });
 
   velocity.x += paddleVelocity.x * 0.11;
-  velocity.y += THREE.MathUtils.clamp(offsetY * 0.28 + power * 0.26, -0.06, 0.8);
+
+  const liftFromContact = THREE.MathUtils.clamp(offsetY * 0.18, -0.04, 0.22);
+  const liftByPower = isDefensiveBackHit
+    ? THREE.MathUtils.lerp(0.5, 0.3, depthByPower)
+    : THREE.MathUtils.lerp(0.5, 0.12, depthByPower);
+
+  velocity.y += liftFromContact + liftByPower;
   velocity.z = -Math.abs(velocity.z);
 
   ensureNetClearance(
     velocity,
     direction,
     isDefensiveBackHit
-      ? THREE.MathUtils.lerp(0.55, 0.82, 1 - PLAYER.stamina)
-      : THREE.MathUtils.lerp(0.34, 0.62, 1 - PLAYER.stamina)
+      ? THREE.MathUtils.lerp(0.78, 0.92, 1 - PLAYER.stamina)
+      : THREE.MathUtils.lerp(0.68, 0.82, 1 - PLAYER.stamina)
   );
 
   const minForward = isDefensiveBackHit
     ? THREE.MathUtils.lerp(3.8, 5.8, depthByPower)
-    : THREE.MathUtils.lerp(5.4, 8.2, depthByPower);
+    : THREE.MathUtils.lerp(5.2, 8.0, depthByPower);
 
   const maxForward = isDefensiveBackHit
     ? THREE.MathUtils.lerp(5.4, 8.4, depthByPower)
-    : THREE.MathUtils.lerp(7.6, 13.6, depthByPower);
+    : THREE.MathUtils.lerp(7.4, 13.0, depthByPower);
 
   ball.velocity.set(
     THREE.MathUtils.clamp(velocity.x, -5.4, 5.4),
-    THREE.MathUtils.clamp(velocity.y, 2.0, 6.9),
+    THREE.MathUtils.clamp(velocity.y, 2.2, 6.05),
     THREE.MathUtils.clamp(velocity.z, -maxForward, -minForward)
   );
 
   ball.spin.set(
-    THREE.MathUtils.clamp(-offsetY * 1.0 + paddleVelocity.z * -0.04, -1.5, 1.5),
-    THREE.MathUtils.clamp(offsetX * 0.9 + paddleVelocity.x * 0.045, -1.4, 1.4),
-    THREE.MathUtils.clamp(-paddleVelocity.x * 0.035, -1.0, 1.0)
+    THREE.MathUtils.clamp(-offsetY * 0.7 + paddleVelocity.z * -0.035, -1.2, 1.2),
+    THREE.MathUtils.clamp(offsetX * 0.85 + paddleVelocity.x * 0.04, -1.3, 1.3),
+    THREE.MathUtils.clamp(-paddleVelocity.x * 0.03, -0.9, 0.9)
   );
+
+  ball.driveDrop = isDefensiveBackHit
+    ? THREE.MathUtils.lerp(0.3, 1.15, depthByPower)
+    : THREE.MathUtils.lerp(1.1, 4.6, depthByPower);
+
+  ball.driveDropDelay = getNetClearDelay(ball.position, ball.velocity, direction);
 
   animatePaddleHit(playerPaddle, power, 'player');
   spawnHitDust(ball.position, power, 1);
-  audio.playPaddleHit({
-    power,
-    distance: 0.4,
-    isPlayer: true
-  });
+  audio.playPaddleHit({ power, distance: 0.4, isPlayer: true });
 }
 
 function solveBallisticVelocity({ start, target, time, gravity }) {
@@ -1031,7 +1101,7 @@ function solveBallisticVelocity({ start, target, time, gravity }) {
   );
 }
 
-function ensureNetClearance(velocity, direction, extraSafety = 0.42) {
+function ensureNetClearance(velocity, direction, extraSafety = 0.72) {
   const dzToNet = COURT.netZ - ball.position.z;
 
   if (Math.sign(dzToNet) !== direction) return;
@@ -1040,13 +1110,22 @@ function ensureNetClearance(velocity, direction, extraSafety = 0.42) {
   if (!Number.isFinite(timeToNet) || timeToNet <= 0) return;
 
   const requiredHeight = COURT.netHeight + BALL.radius + extraSafety;
-  const predictedNetY =
-    ball.position.y + velocity.y * timeToNet + 0.5 * BALL.gravity * timeToNet * timeToNet;
+  const predictedNetY = ball.position.y + velocity.y * timeToNet + 0.5 * BALL.gravity * timeToNet * timeToNet;
 
   if (predictedNetY < requiredHeight) {
     const missing = requiredHeight - predictedNetY;
-    velocity.y += missing / timeToNet + 0.22;
+    velocity.y += missing / timeToNet + 0.24;
   }
+}
+
+function getNetClearDelay(position, velocity, direction) {
+  const dzToNet = COURT.netZ - position.z;
+  if (Math.sign(dzToNet) !== direction) return 0;
+
+  const timeToNet = dzToNet / velocity.z;
+  if (!Number.isFinite(timeToNet) || timeToNet <= 0) return 0;
+
+  return THREE.MathUtils.clamp(timeToNet + 0.08, 0.12, 0.78);
 }
 
 function checkNetCollision() {
@@ -1057,52 +1136,144 @@ function checkNetCollision() {
     (previous.z < COURT.netZ && current.z >= COURT.netZ) ||
     (previous.z > COURT.netZ && current.z <= COURT.netZ);
 
-  if (!crossedNet) return;
+  if (!crossedNet) return false;
 
-  const t = THREE.MathUtils.clamp(
-    (COURT.netZ - previous.z) / (current.z - previous.z || 0.0001),
-    0,
-    1
-  );
-
+  const t = THREE.MathUtils.clamp((COURT.netZ - previous.z) / (current.z - previous.z || 0.0001), 0, 1);
   const yAtNet = THREE.MathUtils.lerp(previous.y, current.y, t);
 
   if (yAtNet < COURT.netHeight + BALL.radius) {
-    ball.position.z = ball.velocity.z > 0 ? -0.09 : 0.09;
-    ball.velocity.z *= -0.38;
-    ball.velocity.y = Math.max(ball.velocity.y, 1.15);
-    ball.velocity.x *= 0.72;
-    ball.spin.multiplyScalar(0.55);
+    const faultOwner = game.lastHitOwner;
+    const winner = oppositePlayer(faultOwner);
 
-    audio.playFloorHit({
-      power: 0.36,
-      distance: distanceFromPlayer(ball.position)
-    });
+    ball.position.z = ball.velocity.z > 0 ? -0.09 : 0.09;
+    ball.velocity.z *= -0.28;
+    ball.velocity.y = Math.max(ball.velocity.y, 0.85);
+    ball.velocity.x *= 0.62;
+    ball.spin.multiplyScalar(0.45);
+    ball.driveDrop *= 0.25;
+    ball.driveDropDelay = 0;
+
+    audio.playFloorHit({ power: 0.36, distance: distanceFromPlayer(ball.position) });
+
+    schedulePointReset(winner, 1.15, `${playerLabel(faultOwner)} hit the net`);
+    return true;
   }
+
+  return false;
 }
 
 function checkOutOfBounds() {
-  const sideLimit = COURT.width / 2 + COURT.sideOutMargin;
-  const backLimit = COURT.halfLength + COURT.backOutMargin;
+  if (ball.firstBounceChecked) return false;
 
-  const sideOut = Math.abs(ball.position.x) > sideLimit;
-  const playerBackOut = ball.position.z > backLimit;
-  const aiBackOut = ball.position.z < -backLimit;
+  const emergencySideLimit = COURT.width / 2 + COURT.sideOutMargin + COURT.emergencyOutMargin;
+  const emergencyBackLimit = COURT.halfLength + COURT.backOutMargin + COURT.emergencyOutMargin;
+
+  const farSideOut = Math.abs(ball.position.x) > emergencySideLimit;
+  const farBackOut = Math.abs(ball.position.z) > emergencyBackLimit;
   const deadLow = ball.position.y < -1.2;
 
-  if (!sideOut && !playerBackOut && !aiBackOut && !deadLow) return;
+  if (!farSideOut && !farBackOut && !deadLow) return false;
 
-  let nextServer = 'player';
+  const winner = oppositePlayer(game.lastHitOwner);
+  const reason = farSideOut
+    ? `${playerLabel(game.lastHitOwner)} hit very wide`
+    : farBackOut
+      ? `${playerLabel(game.lastHitOwner)} hit very long`
+      : 'Dead ball';
 
-  if (playerBackOut || deadLow) {
-    nextServer = 'ai';
-  } else if (aiBackOut) {
-    nextServer = 'player';
-  } else if (sideOut) {
-    nextServer = game.lastHitOwner === 'player' ? 'ai' : 'player';
+  schedulePointReset(winner, 1.0, reason);
+  return true;
+}
+
+function checkDeadBallAndReset(dt) {
+  const horizontalSpeed = Math.sqrt(ball.velocity.x * ball.velocity.x + ball.velocity.z * ball.velocity.z);
+  const totalSpeed = ball.velocity.length();
+  const onFloor = ball.position.y <= BALL.minY + 0.025;
+
+  if (ball.bounceCount >= 2) {
+    schedulePointReset(determineWinnerFromDeadBall(), 0.85, 'Double bounce');
+    return;
   }
 
-  enterServeState(nextServer);
+  if (onFloor && totalSpeed < 0.9 && horizontalSpeed < 0.75) {
+    schedulePointReset(determineWinnerFromDeadBall(), 0.9, 'Ball stopped');
+    return;
+  }
+
+  if (Math.abs(ball.position.z - COURT.netZ) < 0.35 && totalSpeed < 1.15 && onFloor) {
+    schedulePointReset(oppositePlayer(game.lastHitOwner), 0.85, 'Ball died near net');
+  }
+}
+
+function schedulePointReset(winner, delay = 0.75, reason = '') {
+  if (game.pendingServer) return;
+
+  if (!winner) winner = 'player';
+
+  if (winner === 'player') game.playerScore += 1;
+  else game.aiScore += 1;
+
+  game.pendingServer = winner;
+  game.deadBallTimer = delay;
+  game.state = 'pointOver';
+
+  ball.velocity.multiplyScalar(0.35);
+  ball.spin.multiplyScalar(0.3);
+  ball.driveDrop = 0;
+  ball.driveDropDelay = 0;
+
+  showPointOverlay(winner, reason);
+
+  if (winner === 'player') audio.playPointWin();
+  else audio.playPointLose();
+}
+
+function showPointOverlay(winner, reason = '') {
+  const isPlayer = winner === 'player';
+  const title = isPlayer ? 'YOU WIN THE RALLY' : 'OPPONENT WINS THE RALLY';
+  const serveText = isPlayer ? 'Your serve next' : 'Opponent serves next';
+  const scoreText = `You ${game.playerScore} — ${game.aiScore} Opponent`;
+
+  pointOverlay.innerHTML = `
+    <div style="font-size: 30px; color: ${isPlayer ? '#38bdf8' : '#fb7185'};">${title}</div>
+    <div style="font-size: 15px; font-weight: 700; margin-top: 8px; color: rgba(255,255,255,0.86);">${reason}</div>
+    <div style="font-size: 18px; margin-top: 10px; color: #ffffff;">+1 Point</div>
+    <div style="font-size: 14px; margin-top: 8px; color: rgba(255,255,255,0.72);">${scoreText}</div>
+    <div style="font-size: 13px; margin-top: 6px; color: rgba(255,255,255,0.64);">${serveText}</div>
+  `;
+
+  pointOverlay.style.opacity = '1';
+  pointOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+
+  window.clearTimeout(pointOverlay._hideTimer);
+  pointOverlay._hideTimer = window.setTimeout(() => {
+    pointOverlay.style.opacity = '0';
+    pointOverlay.style.transform = 'translate(-50%, -50%) scale(0.96)';
+  }, 1350);
+}
+
+function determineWinnerFromDeadBall() {
+  if (game.lastHitOwner === 'player') {
+    return ball.firstBounceIn && ball.firstBouncePosition.z < COURT.netZ ? 'player' : 'ai';
+  }
+
+  if (game.lastHitOwner === 'ai') {
+    return ball.firstBounceIn && ball.firstBouncePosition.z > COURT.netZ ? 'ai' : 'player';
+  }
+
+  return game.server || 'player';
+}
+
+function oppositePlayer(owner) {
+  if (owner === 'player') return 'ai';
+  if (owner === 'ai') return 'player';
+  return game.server === 'player' ? 'ai' : 'player';
+}
+
+function playerLabel(owner) {
+  if (owner === 'player') return 'You';
+  if (owner === 'ai') return 'Opponent';
+  return 'Player';
 }
 
 function createDustSystem() {
@@ -1150,15 +1321,7 @@ function createDustSystem() {
 
   const points = new THREE.Points(geometry, material);
 
-  return {
-    points,
-    geometry,
-    positions,
-    colors,
-    sizes,
-    particles,
-    cursor: 0
-  };
+  return { points, geometry, positions, colors, sizes, particles, cursor: 0 };
 }
 
 function spawnHitDust(position, power, direction) {
@@ -1353,6 +1516,44 @@ function createGameAudio() {
     });
   }
 
+  function playPointWin() {
+    const ctx = ensureContext();
+    const now = ctx.currentTime;
+    playTone({ frequency: 523.25, start: now, duration: 0.08, volume: 0.16, type: 'sine' });
+    playTone({ frequency: 659.25, start: now + 0.08, duration: 0.08, volume: 0.18, type: 'sine' });
+    playTone({ frequency: 783.99, start: now + 0.16, duration: 0.16, volume: 0.22, type: 'triangle' });
+    playNoiseBurst({ duration: 0.09, volume: 0.08, frequency: 2800, q: 0.9 });
+  }
+
+  function playPointLose() {
+    const ctx = ensureContext();
+    const now = ctx.currentTime;
+    playTone({ frequency: 246.94, start: now, duration: 0.12, volume: 0.2, type: 'sawtooth' });
+    playTone({ frequency: 196.0, start: now + 0.12, duration: 0.16, volume: 0.18, type: 'triangle' });
+    playTone({ frequency: 146.83, start: now + 0.26, duration: 0.22, volume: 0.16, type: 'sine' });
+    playNoiseBurst({ duration: 0.12, volume: 0.06, frequency: 520, q: 0.5 });
+  }
+
+  function playTone({ frequency, start, duration, volume, type }) {
+    const ctx = ensureContext();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(frequency, start);
+
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+    osc.connect(gain);
+    gain.connect(master);
+
+    osc.start(start);
+    osc.stop(start + duration + 0.02);
+  }
+
   function playNoiseBurst({ duration, volume, frequency, q }) {
     const ctx = ensureContext();
     const now = ctx.currentTime;
@@ -1387,7 +1588,9 @@ function createGameAudio() {
   return {
     resume,
     playPaddleHit,
-    playFloorHit
+    playFloorHit,
+    playPointWin,
+    playPointLose
   };
 }
 

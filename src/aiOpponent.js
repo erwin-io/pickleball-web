@@ -2,358 +2,354 @@ import * as THREE from 'three';
 
 export class HumanLikePickleballAI {
   constructor(options = {}) {
-    this.baseReaction = options.baseReaction ?? 0.1;
-    this.baseMaxSpeed = options.baseMaxSpeed ?? 7.2;
-    this.sprintSpeed = options.sprintSpeed ?? 9.7;
-    this.acceleration = options.acceleration ?? 18;
-    this.deceleration = options.deceleration ?? 15;
-    this.skill = THREE.MathUtils.clamp(options.skill ?? 0.82, 0, 1);
-
-    this.homeX = options.homeX ?? 0;
-    this.homeY = options.homeY ?? 1.26;
-
-    this.stamina = THREE.MathUtils.clamp(options.stamina ?? 0.82, 0.08, 1);
-    this.stress = 0.18;
-    this.confidence = 0.72;
-    this.preparedness = 0.62;
+    this.baseReaction = options.baseReaction ?? 0.08;
+    this.baseMaxSpeed = options.baseMaxSpeed ?? 7.8;
+    this.sprintSpeed = options.sprintSpeed ?? 11.0;
+    this.acceleration = options.acceleration ?? 22.0;
+    this.deceleration = options.deceleration ?? 18.0;
+    this.skill = options.skill ?? 0.86;
+    this.stamina = options.stamina ?? 0.86;
 
     this.velocity = new THREE.Vector3();
-    this.target = new THREE.Vector3(this.homeX, this.homeY, -5.35);
-    this.lastTarget = this.target.clone();
+    this.target = new THREE.Vector3();
 
-    this.thinkTimer = 0;
-    this.time = 0;
-    this.lastMoveIntensity = 0;
-    this.lastContactQuality = 0.7;
+    this.reactionTimer = 0;
+    this.commitTimer = 0;
+
+    this.pressure = 0.18;
+    this.errorBiasX = 0;
+    this.errorBiasZ = 0;
+
+    this.lastTargetReason = 'home';
   }
 
-  update({ dt, ball, paddle, court, ballConfig, rallyHits, gameState }) {
-    this.time += dt;
+  update({ dt, ball, paddle, court, gameState }) {
+    if (!dt || !ball || !paddle || !court) return;
 
-    if (gameState === 'waitingServe') {
-      this._recover(dt, true);
-      this._moveToReady({ dt, paddle, court });
+    const limits = this.getMovementLimits(court);
+
+    if (gameState !== 'rally') {
+      this.target.set(0, paddle.position.y, limits.homeZ);
+      this.movePaddle(dt, paddle, court);
+      this.recover(dt);
       return;
     }
 
-    const ballSpeed = ball.velocity.length();
-    const ballComingToAI = ball.velocity.z < 0;
-    const distanceToBall = paddle.position.distanceTo(ball.position);
-    const urgent = ballComingToAI && ball.position.z < court.aiPaddleZ + 2.1;
+    const ballOnAISide = ball.position.z <= 0.35;
+    const ballMovingToAI = ball.velocity.z < -0.08;
+    const ballNearNetOnAISide = ball.position.z > limits.forwardZ - 0.85 && ball.position.z < 0.45;
+    const ballSlow = ball.velocity.length() < 3.1;
 
-    this._updateMind({
-      dt,
-      ballSpeed,
-      ballComingToAI,
-      distanceToBall,
-      rallyHits
-    });
+    const shouldChase =
+      ballOnAISide ||
+      ballMovingToAI ||
+      ballNearNetOnAISide;
 
-    this.thinkTimer -= dt;
+    this.updateMind(dt, ball, paddle, shouldChase);
 
-    if (urgent) {
-      this.target.copy(this._closeRangeTarget({ ball, court }));
-    } else if (this.thinkTimer <= 0) {
-      this.thinkTimer = this._currentReactionDelay();
-      this.lastTarget.copy(this.target);
-      this.target.copy(this._chooseTarget({ ball, court, ballConfig, rallyHits }));
+    this.reactionTimer -= dt;
+    this.commitTimer -= dt;
+
+    if (shouldChase) {
+      if (this.reactionTimer <= 0 || this.commitTimer <= 0) {
+        const target = this.chooseBestMovementTarget(ball, paddle, court);
+
+        this.target.copy(target);
+
+        this.reactionTimer = this.getReactionDelay(ball, ballSlow);
+        this.commitTimer = THREE.MathUtils.randFloat(0.08, 0.22);
+      }
+    } else {
+      this.target.x = THREE.MathUtils.lerp(this.target.x, 0, 0.05);
+      this.target.y = paddle.position.y;
+      this.target.z = THREE.MathUtils.lerp(this.target.z, limits.homeZ, 0.04);
+      this.lastTargetReason = 'recover-home';
     }
 
-    this._moveLikeHuman({ dt, paddle, court, ballComingToAI });
+    this.movePaddle(dt, paddle, court);
   }
 
-  getShotIntent({ paddle, paddleVelocity, court, rallyHits, contactOffsetX, contactOffsetY }) {
-    const centerQuality =
-      1 -
-      THREE.MathUtils.clamp(
-        Math.sqrt(contactOffsetX * contactOffsetX + contactOffsetY * contactOffsetY) / 1.25,
-        0,
-        1
-      );
-
-    const preparation = THREE.MathUtils.clamp(this.preparedness, 0, 1);
-    const energy = THREE.MathUtils.clamp(this.stamina, 0, 1);
-    const calm = 1 - THREE.MathUtils.clamp(this.stress, 0, 1);
-    const movementBalance = 1 - THREE.MathUtils.clamp(this.lastMoveIntensity * 0.42, 0, 0.38);
-
-    const contactQuality = THREE.MathUtils.clamp(
-      0.2 +
-        centerQuality * 0.34 +
-        preparation * 0.22 +
-        energy * 0.14 +
-        calm * 0.12 +
-        movementBalance * 0.08,
-      0.1,
-      1
-    );
-
-    this.lastContactQuality = contactQuality;
-
-    const variation = this._noise(rallyHits * 1.19 + this.time * 0.37);
-    const pressurePenalty = this.stress * 0.32;
-    const tiredPenalty = (1 - this.stamina) * 0.28;
-
-    const power = THREE.MathUtils.clamp(
-      0.46 +
-        energy * 0.27 +
-        preparation * 0.22 +
-        centerQuality * 0.16 -
-        pressurePenalty -
-        tiredPenalty +
-        variation * 0.11,
-      0.24,
-      1.08
-    );
-
-    const attackUrge = THREE.MathUtils.clamp(
-      this.confidence * 0.52 + this.stamina * 0.25 - this.stress * 0.2 + variation * 0.16,
-      0,
-      1
-    );
-
-    const wantsHardDrive = attackUrge > 0.61 && contactQuality > 0.55;
-    const wantsSafeLob = this.stress > 0.68 || this.stamina < 0.3 || contactQuality < 0.43;
-
-    const targetDepth = wantsHardDrive ? 5.75 : wantsSafeLob ? 4.35 : 5.05;
-    const targetXNoise = this._noise(this.time * 0.91 + rallyHits * 2.17) * (wantsSafeLob ? 0.45 : 1.05);
-
-    const targetX = THREE.MathUtils.clamp(
-      paddle.position.x * 0.08 + targetXNoise + contactOffsetX * 0.82,
-      -court.width / 2 + 0.55,
-      court.width / 2 - 0.55
-    );
-
-    const arcBoost = wantsSafeLob ? 0.78 : wantsHardDrive ? -0.08 : 0.22;
-    const speedBoost = wantsHardDrive ? 1.18 : wantsSafeLob ? 0.83 : 1;
-
-    this.stamina = THREE.MathUtils.clamp(
-      this.stamina - (0.035 + power * 0.075 + this.stress * 0.028),
-      0.08,
-      1
-    );
-
-    this.stress = THREE.MathUtils.clamp(
-      this.stress + (1 - contactQuality) * 0.11 - contactQuality * 0.025,
-      0,
-      1
-    );
-
-    this.confidence = THREE.MathUtils.clamp(
-      this.confidence + (contactQuality - 0.55) * 0.07,
-      0.18,
-      0.95
-    );
-
-    this.preparedness = THREE.MathUtils.clamp(this.preparedness - 0.15, 0, 1);
-
+  getMovementLimits(court) {
     return {
-      power,
-      contactQuality,
-      targetX,
-      targetZ: targetDepth,
-      arcBoost,
-      speedBoost,
-      wantsHardDrive,
-      wantsSafeLob,
-      netSafety: THREE.MathUtils.lerp(0.36, 0.82, 1 - contactQuality + this.stress * 0.35)
+      minX: -court.width / 2 + 0.42,
+      maxX: court.width / 2 - 0.42,
+
+      // Important:
+      // AI can now move close to the net and far backward.
+      // This fixes slow balls landing near the kitchen/net.
+      forwardZ: court.aiForwardMaxZ ?? -1.15,
+      backZ: court.aiBackMinZ ?? -(court.halfLength + 0.78),
+      homeZ: court.aiPaddleZ ?? -(court.halfLength - 1.45)
     };
   }
 
-  _updateMind({ dt, ballSpeed, ballComingToAI, distanceToBall, rallyHits }) {
-    const pressureFromSpeed = THREE.MathUtils.smoothstep(ballSpeed, 5.5, 11.5);
-    const pressureFromDistance = ballComingToAI
-      ? 1 - THREE.MathUtils.smoothstep(distanceToBall, 0.8, 4.6)
-      : 0;
-    const pressureFromRally = THREE.MathUtils.clamp(rallyHits / 26, 0, 0.35);
-    const lowEnergyPressure = THREE.MathUtils.clamp((0.42 - this.stamina) / 0.42, 0, 1) * 0.55;
+  updateMind(dt, ball, paddle, shouldChase) {
+    const distanceToBall = paddle.position.distanceTo(ball.position);
+    const ballSpeed = ball.velocity.length();
 
-    const targetStress = THREE.MathUtils.clamp(
-      pressureFromSpeed * 0.32 +
-        pressureFromDistance * 0.42 +
-        pressureFromRally +
-        lowEnergyPressure,
-      0.06,
-      0.95
-    );
+    if (shouldChase) {
+      this.pressure += 0.22 * dt;
 
-    this.stress += (targetStress - this.stress) * (1 - Math.pow(0.13, dt));
+      if (distanceToBall > 2.0) {
+        this.pressure += 0.18 * dt;
+      }
 
-    const movingHard = this.lastMoveIntensity > 0.62;
-    const ballAway = !ballComingToAI;
-    const recoveryRate = ballAway ? 0.12 : 0.045;
-    const drainRate = movingHard ? 0.125 * this.lastMoveIntensity + this.stress * 0.04 : 0;
+      if (ballSpeed < 2.2) {
+        this.pressure -= 0.06 * dt;
+      }
 
-    this.stamina = THREE.MathUtils.clamp(this.stamina + recoveryRate * dt - drainRate * dt, 0.08, 1);
+      const drain = THREE.MathUtils.clamp(ballSpeed / 12, 0, 1) * 0.06 * dt;
+      const sprintDrain = distanceToBall > 2.4 ? 0.055 * dt : 0.02 * dt;
 
-    const prepGain = ballComingToAI ? 0.68 : 0.38;
-    const prepLoss = this.stress * 0.18 + (1 - this.stamina) * 0.12;
+      this.stamina -= drain + sprintDrain;
+    } else {
+      this.pressure -= 0.16 * dt;
+      this.stamina += 0.12 * dt;
+    }
 
-    this.preparedness = THREE.MathUtils.clamp(
-      this.preparedness + (prepGain - prepLoss) * dt,
-      0,
-      1
-    );
-
-    this.confidence = THREE.MathUtils.clamp(
-      this.confidence + (0.72 - this.confidence) * dt * 0.08 - this.stress * dt * 0.018,
-      0.18,
-      0.94
-    );
+    this.pressure = THREE.MathUtils.clamp(this.pressure, 0, 1);
+    this.stamina = THREE.MathUtils.clamp(this.stamina, 0.2, 1);
   }
 
-  _recover(dt, relaxed = false) {
-    this.stamina = THREE.MathUtils.clamp(this.stamina + (relaxed ? 0.18 : 0.1) * dt, 0.08, 1);
-    this.stress = THREE.MathUtils.clamp(this.stress - (relaxed ? 0.12 : 0.05) * dt, 0.06, 1);
-    this.preparedness = THREE.MathUtils.clamp(this.preparedness + 0.16 * dt, 0, 1);
-  }
+  getReactionDelay(ball, ballSlow) {
+    const fatigue = 1 - this.stamina;
+    const pressureDelay = this.pressure * 0.025;
+    const fatigueDelay = fatigue * 0.05;
 
-  _currentReactionDelay() {
+    // If the ball is slow, the AI should react faster and walk forward to it.
+    const slowBallBonus = ballSlow ? -0.035 : 0;
+
     return THREE.MathUtils.clamp(
-      this.baseReaction + this.stress * 0.12 + (1 - this.stamina) * 0.14,
-      0.075,
-      0.28
+      this.baseReaction + pressureDelay + fatigueDelay + slowBallBonus,
+      0.025,
+      0.16
     );
   }
 
-  _chooseTarget({ ball, court, ballConfig, rallyHits }) {
-    if (ball.velocity.z >= 0) {
-      return this._readyPosition({ ball, court });
+  chooseBestMovementTarget(ball, paddle, court) {
+    const limits = this.getMovementLimits(court);
+
+    const directTarget = this.getDirectChaseTarget(ball, paddle, court);
+    const predictedTarget = this.predictIntercept(ball, paddle, court);
+
+    const ballSlow = ball.velocity.length() < 3.0;
+    const ballNearNet = ball.position.z > limits.forwardZ - 0.75 && ball.position.z < 0.6;
+    const ballAlreadyOnAISide = ball.position.z < 0;
+
+    let chosen = predictedTarget;
+
+    // Important fix:
+    // For slow balls, dinks, and balls near the net, prediction often waits too deep.
+    // A human would step forward. So AI directly moves toward the ball position.
+    if (ballSlow || ballNearNet || ballAlreadyOnAISide) {
+      chosen = directTarget;
+      this.lastTargetReason = 'direct-chase';
+    } else {
+      this.lastTargetReason = 'prediction';
     }
 
-    const predicted = this._simulateIntercept({ ball, court, ballConfig });
-    if (!predicted) return this._readyPosition({ ball, court });
+    const fatigue = 1 - this.stamina;
+    const pressureMiss = this.pressure * (1 - this.skill);
 
-    const pressureError = (this.stress * 0.62 + (1 - this.stamina) * 0.38) * (1 - this.skill + 0.26);
-    const xError = this._noise(this.time * 0.77 + rallyHits * 1.13) * pressureError * 0.95;
-    const yError = this._noise(this.time * 1.01 + rallyHits * 0.53) * pressureError * 0.27;
+    const errorX = THREE.MathUtils.randFloatSpread(0.08 + fatigue * 0.16 + pressureMiss * 0.24);
+    const errorZ = THREE.MathUtils.randFloatSpread(0.08 + fatigue * 0.16 + pressureMiss * 0.24);
 
-    const target = new THREE.Vector3(
-      predicted.x + xError,
-      predicted.y - 0.1 + yError,
-      court.aiPaddleZ
-    );
+    chosen.x += errorX;
+    chosen.z += errorZ;
 
-    target.y = Math.max(target.y, 0.82);
-    return this._clampTarget(target, court);
+    chosen.x = THREE.MathUtils.clamp(chosen.x, limits.minX, limits.maxX);
+    chosen.z = THREE.MathUtils.clamp(chosen.z, limits.backZ, limits.forwardZ);
+    chosen.y = paddle.position.y;
+
+    return chosen;
   }
 
-  _simulateIntercept({ ball, court, ballConfig }) {
-    const pos = ball.position.clone();
-    const vel = ball.velocity.clone();
-    const step = 1 / 120;
-    const maxSteps = 340;
+  getDirectChaseTarget(ball, paddle, court) {
+    const limits = this.getMovementLimits(court);
 
-    let prev = pos.clone();
+    const target = new THREE.Vector3();
 
-    for (let i = 0; i < maxSteps; i++) {
-      prev.copy(pos);
+    target.x = ball.position.x;
 
-      vel.y += ball.gravity * step;
-      vel.multiplyScalar(Math.pow(ballConfig.drag, step * 60));
-      pos.addScaledVector(vel, step);
+    // Put paddle slightly behind the ball relative to AI side.
+    // If ball is close to net, AI moves forward close to kitchen/net.
+    // If ball is deep, AI moves backward.
+    target.z = ball.position.z - 0.18;
 
-      if (pos.y <= ballConfig.minY) {
-        pos.y = ballConfig.minY;
-        if (vel.y < 0) {
-          vel.y = -vel.y * ballConfig.bounce;
-          vel.x *= ballConfig.floorFriction;
-          vel.z *= ballConfig.floorFriction;
-        }
-      }
-
-      if (prev.z >= court.aiPaddleZ && pos.z <= court.aiPaddleZ) {
-        const t = (court.aiPaddleZ - prev.z) / (pos.z - prev.z || 0.0001);
-        return new THREE.Vector3(
-          THREE.MathUtils.lerp(prev.x, pos.x, t),
-          THREE.MathUtils.lerp(prev.y, pos.y, t),
-          court.aiPaddleZ
-        );
-      }
+    // If the ball is still flying and moving toward AI, meet it a bit earlier.
+    if (ball.velocity.z < -0.2) {
+      target.z = ball.position.z - 0.35;
     }
 
-    return null;
-  }
-
-  _closeRangeTarget({ ball, court }) {
-    const pressureLag = THREE.MathUtils.lerp(0.08, 0.35, this.stress + (1 - this.stamina) * 0.45);
-
-    const target = new THREE.Vector3(
-      THREE.MathUtils.lerp(ball.position.x, this.target.x, pressureLag),
-      THREE.MathUtils.lerp(ball.position.y - 0.08, this.target.y, pressureLag),
-      court.aiPaddleZ
-    );
-
-    return this._clampTarget(target, court);
-  }
-
-  _readyPosition({ ball, court }) {
-    const anticipationX = THREE.MathUtils.clamp(ball.position.x * 0.18, -0.75, 0.75);
-    const energyPostureDrop = (1 - this.stamina) * 0.14;
-
-    return this._clampTarget(
-      new THREE.Vector3(this.homeX + anticipationX, this.homeY - energyPostureDrop, court.aiPaddleZ),
-      court
-    );
-  }
-
-  _moveToReady({ dt, paddle, court }) {
-    this.target.copy(this._clampTarget(new THREE.Vector3(this.homeX, this.homeY, court.aiPaddleZ), court));
-    this._moveLikeHuman({ dt, paddle, court, ballComingToAI: false });
-  }
-
-  _moveLikeHuman({ dt, paddle, court, ballComingToAI }) {
-    const desired = this.target.clone().sub(paddle.position);
-    const distance = desired.length();
-
-    let desiredVelocity = new THREE.Vector3();
-
-    if (distance > 0.015) {
-      const urgency = ballComingToAI
-        ? THREE.MathUtils.clamp(distance / 2.4 + this.stress * 0.38, 0.18, 1)
-        : 0.35;
-
-      const staminaSpeed = THREE.MathUtils.lerp(0.52, 1.0, this.stamina);
-      const stressBoost = this.stress > 0.58 && this.stamina > 0.34 ? 1.08 : 1;
-      const maxSpeed = THREE.MathUtils.lerp(this.baseMaxSpeed, this.sprintSpeed, urgency) * staminaSpeed * stressBoost;
-
-      desiredVelocity.copy(desired.normalize().multiplyScalar(maxSpeed));
+    // If ball is almost stopped near net, AI should rush forward.
+    if (ball.velocity.length() < 2.2 && ball.position.z > limits.forwardZ - 0.9) {
+      target.z = ball.position.z - 0.08;
     }
 
-    const diff = desiredVelocity.sub(this.velocity);
-    const accelLimit = desiredVelocity.length() > this.velocity.length() ? this.acceleration : this.deceleration;
-    const maxChange = accelLimit * dt;
+    target.x = THREE.MathUtils.clamp(target.x, limits.minX, limits.maxX);
+    target.z = THREE.MathUtils.clamp(target.z, limits.backZ, limits.forwardZ);
+    target.y = paddle.position.y;
 
-    if (diff.length() > maxChange) {
-      diff.normalize().multiplyScalar(maxChange);
-    }
-
-    this.velocity.add(diff);
-
-    const stumble = this._noise(this.time * 8.0) * this.stress * (1 - this.stamina) * 0.025;
-
-    paddle.position.addScaledVector(this.velocity, dt);
-    paddle.position.x += stumble;
-
-    this._clampPaddle(paddle, court);
-
-    this.lastMoveIntensity = THREE.MathUtils.clamp(this.velocity.length() / Math.max(this.sprintSpeed, 0.001), 0, 1);
-  }
-
-  _clampTarget(target, court) {
-    target.x = THREE.MathUtils.clamp(target.x, -court.width / 2 + 0.5, court.width / 2 - 0.5);
-    target.y = THREE.MathUtils.clamp(target.y, 0.74, 2.55);
-    target.z = court.aiPaddleZ;
     return target;
   }
 
-  _clampPaddle(paddle, court) {
-    paddle.position.x = THREE.MathUtils.clamp(paddle.position.x, -court.width / 2 + 0.45, court.width / 2 - 0.45);
-    paddle.position.y = THREE.MathUtils.clamp(paddle.position.y, 0.72, 2.58);
-    paddle.position.z = court.aiPaddleZ;
+  predictIntercept(ball, paddle, court) {
+    const limits = this.getMovementLimits(court);
+
+    const start = ball.position.clone();
+    const velocity = ball.velocity.clone();
+
+    const gravity = ball.gravity ?? -7.25;
+    const minY = 0.16;
+
+    let bestTarget = new THREE.Vector3(
+      THREE.MathUtils.clamp(ball.position.x, limits.minX, limits.maxX),
+      paddle.position.y,
+      THREE.MathUtils.clamp(ball.position.z, limits.backZ, limits.forwardZ)
+    );
+
+    let bestScore = Infinity;
+
+    for (let t = 0.05; t <= 2.4; t += 0.035) {
+      const predicted = start.clone().addScaledVector(velocity, t);
+      predicted.y += 0.5 * gravity * t * t;
+
+      if (predicted.y < minY) {
+        predicted.y = minY;
+      }
+
+      // Only target AI side or near-net transition.
+      if (predicted.z > 0.65) {
+        continue;
+      }
+
+      const candidate = new THREE.Vector3(
+        THREE.MathUtils.clamp(predicted.x, limits.minX, limits.maxX),
+        paddle.position.y,
+        THREE.MathUtils.clamp(predicted.z - 0.2, limits.backZ, limits.forwardZ)
+      );
+
+      const distance = candidate.distanceTo(paddle.position);
+
+      const staminaSpeed = THREE.MathUtils.lerp(this.baseMaxSpeed * 0.7, this.sprintSpeed, this.stamina);
+      const reachableTime = distance / Math.max(staminaSpeed, 0.001);
+
+      const heightPenalty = Math.abs(predicted.y - paddle.position.y) * 0.13;
+      const forwardReward = predicted.z > limits.forwardZ - 1.2 ? -0.18 : 0;
+      const score = Math.abs(reachableTime - t) + heightPenalty + forwardReward;
+
+      if (reachableTime <= t + 0.22 && score < bestScore) {
+        bestScore = score;
+        bestTarget.copy(candidate);
+      }
+    }
+
+    return bestTarget;
   }
 
-  _noise(seed) {
-    const v = Math.sin(seed * 12.9898 + 78.233) * 43758.5453123;
-    return (v - Math.floor(v)) * 2 - 1;
+  movePaddle(dt, paddle, court) {
+    const limits = this.getMovementLimits(court);
+
+    const toTarget = new THREE.Vector3().subVectors(this.target, paddle.position);
+    toTarget.y = 0;
+
+    const distance = toTarget.length();
+
+    if (distance < 0.015) {
+      this.velocity.multiplyScalar(Math.pow(0.82, dt * 60));
+      return;
+    }
+
+    const direction = toTarget.normalize();
+
+    const fatigue = 1 - this.stamina;
+    const pressureSprint = THREE.MathUtils.clamp(this.pressure, 0, 1);
+
+    const maxSpeed = THREE.MathUtils.lerp(
+      this.baseMaxSpeed,
+      this.sprintSpeed,
+      pressureSprint
+    ) * THREE.MathUtils.lerp(0.68, 1.0, this.stamina);
+
+    const desiredSpeed = THREE.MathUtils.clamp(distance * 5.2, 0, maxSpeed);
+    const desiredVelocity = direction.multiplyScalar(desiredSpeed);
+
+    const currentSpeed = this.velocity.length();
+    const accel = desiredSpeed > currentSpeed ? this.acceleration : this.deceleration;
+
+    this.velocity.lerp(
+      desiredVelocity,
+      1 - Math.pow(0.001, dt * accel)
+    );
+
+    // Human-ish fatigue, but still allows forward/back/side movement.
+    const movementFactor = THREE.MathUtils.lerp(0.74, 1.0, 1 - fatigue);
+
+    paddle.position.x += this.velocity.x * dt * movementFactor;
+    paddle.position.z += this.velocity.z * dt * movementFactor;
+
+    paddle.position.x = THREE.MathUtils.clamp(paddle.position.x, limits.minX, limits.maxX);
+    paddle.position.z = THREE.MathUtils.clamp(paddle.position.z, limits.backZ, limits.forwardZ);
+    paddle.position.y = paddle.position.y;
+  }
+
+  getShotIntent({ ball, paddle, paddleVelocity, court, contactOffsetX = 0, contactOffsetY = 0 }) {
+    const limits = this.getMovementLimits(court);
+
+    const fatigue = 1 - this.stamina;
+    const pressure = this.pressure;
+
+    const contactDistance = Math.sqrt(
+      contactOffsetX * contactOffsetX +
+      contactOffsetY * contactOffsetY
+    );
+
+    const contactQuality = THREE.MathUtils.clamp(
+      1 - contactDistance * 0.5 - fatigue * 0.18,
+      0.22,
+      1
+    );
+
+    const nearNet = paddle.position.z > limits.forwardZ - 0.85;
+    const tired = this.stamina < 0.36;
+    const highPressure = pressure > 0.78;
+
+    const wantsSafeLob = tired || highPressure || nearNet;
+
+    const powerBase = wantsSafeLob
+      ? THREE.MathUtils.randFloat(0.42, 0.72)
+      : THREE.MathUtils.randFloat(0.58, 1.08);
+
+    const power = THREE.MathUtils.clamp(
+      powerBase * contactQuality * THREE.MathUtils.lerp(0.78, 1.08, this.stamina),
+      0.24,
+      1.12
+    );
+
+    const targetX = THREE.MathUtils.clamp(
+      -paddle.position.x * 0.16 + THREE.MathUtils.randFloatSpread(wantsSafeLob ? 1.4 : 1.9),
+      -court.width / 2 + 0.72,
+      court.width / 2 - 0.72
+    );
+
+    const targetZ = wantsSafeLob
+      ? THREE.MathUtils.randFloat(4.7, Math.min(court.halfLength - 0.9, 7.4))
+      : THREE.MathUtils.randFloat(5.2, Math.min(court.halfLength - 0.55, 8.0));
+
+    return {
+      targetX,
+      targetZ,
+      power,
+      speedBoost: wantsSafeLob ? 0.82 : THREE.MathUtils.randFloat(0.92, 1.1),
+      arcBoost: wantsSafeLob ? THREE.MathUtils.randFloat(0.42, 0.78) : THREE.MathUtils.randFloat(0.12, 0.32),
+      netSafety: wantsSafeLob ? 0.92 : 0.78,
+      contactQuality,
+      wantsSafeLob
+    };
+  }
+
+  recover(dt) {
+    this.stamina = THREE.MathUtils.clamp(this.stamina + 0.12 * dt, 0.2, 1);
+    this.pressure = THREE.MathUtils.clamp(this.pressure - 0.16 * dt, 0, 1);
   }
 }
